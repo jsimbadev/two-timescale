@@ -6,7 +6,7 @@ import numpy as np
 
 from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
 from two_timescale.gmm import OnlineGaussianMixture
-from two_timescale.ngpca import EFORRLSARecursion, NeuralGasPCA
+from two_timescale.ngpca import CVTRecursion, EFORRLSARecursion, NeuralGasPCA, ResidualVarianceRecursion
 from two_timescale.potentials import LocalPCAGeometry, NamedPotential, as_potential
 
 
@@ -56,6 +56,22 @@ class RecursionSmokeTests(unittest.TestCase):
         self.assertTrue(np.isfinite(state.weight).all())
         self.assertTrue(np.all(state.eigenvalue > 0.0))
         self.assertEqual(shape.iteration, 1)
+
+    def test_cvt_recursion_updates_a_center(self) -> None:
+        center = CVTRecursion.from_center(np.array([1.0, -1.0]))
+
+        updated = center.advance(x_c=np.array([2.0, 4.0]), alpha=0.25)
+
+        np.testing.assert_allclose(updated, np.array([1.5, 0.0]))
+        self.assertEqual(center.iteration, 1)
+
+    def test_residual_variance_recursion_tracks_unrepresented_variance(self) -> None:
+        sigma = ResidualVarianceRecursion.from_sigma_sqr(2.0)
+
+        updated = sigma.advance(residual=6.0, alpha=0.25)
+
+        self.assertEqual(updated, 3.0)
+        self.assertEqual(sigma.iteration, 1)
 
     def test_vector_field_can_be_scaled_by_a_control_recursion(self) -> None:
         control = Recursion(0.5, VectorField(lambda state, obs, ctx: 0.1, name="constant"), step_size=1.0)

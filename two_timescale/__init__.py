@@ -12,17 +12,20 @@ from .core import (
 )
 from .gmm import GMMMoments, OnlineGaussianMixture
 from .ngpca import (
+    CVTRecursion,
     EFORRLSAObservation,
     EFORRLSARecursion,
     EFORRLSAState,
     LearningRateRecursions,
     NGPCAParameters,
     NeuralGasPCA,
+    ResidualVarianceRecursion,
 )
 from .potentials import LocalPCAGeometry, NamedPotential, PotentialFunction, PotentialName, as_potential
 
 __all__ = [
     "Control",
+    "CVTRecursion",
     "EMARecursion",
     "EFORRLSAObservation",
     "EFORRLSARecursion",
@@ -40,6 +43,7 @@ __all__ = [
     "PotentialName",
     "Recursion",
     "RecursionContext",
+    "ResidualVarianceRecursion",
     "ScheduledLearningRate",
     "VectorField",
     "as_potential",

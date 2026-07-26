@@ -66,6 +66,65 @@ class LearningRateRecursions:
 
 
 @dataclass
+class CVTRecursion:
+    """Centroidal vector quantization update for a local PCA center."""
+
+    state: np.ndarray
+    iteration: int = 0
+
+    def __post_init__(self) -> None:
+        self.recursion = Recursion(
+            self.state.copy(),
+            _cvt_field(),
+            step_size=1.0,
+            name="cvt_center",
+            iteration=self.iteration,
+        )
+
+    @classmethod
+    def from_center(cls, center: np.ndarray) -> "CVTRecursion":
+        return cls(center.copy())
+
+    def advance(
+        self,
+        x_c: np.ndarray,
+        alpha: float,
+        context: RecursionContext | None = None,
+    ) -> np.ndarray:
+        if context is None:
+            context = RecursionContext(iteration=self.recursion.iteration)
+        self.recursion.step_size = float(alpha)
+        self.state = self.recursion.advance(x_c, context)
+        self.iteration = self.recursion.iteration
+        return self.state
+
+
+@dataclass
+class ResidualVarianceRecursion:
+    """EMA for variance outside the represented PCA subspace."""
+
+    state: float
+    iteration: int = 0
+
+    def __post_init__(self) -> None:
+        self.recursion = EMARecursion(float(self.state), name="residual_variance", iteration=self.iteration)
+
+    @classmethod
+    def from_sigma_sqr(cls, sigma_sqr: float) -> "ResidualVarianceRecursion":
+        return cls(float(sigma_sqr))
+
+    def advance(
+        self,
+        residual: float,
+        alpha: float,
+        context: RecursionContext | None = None,
+    ) -> float:
+        self.state = float(self.recursion.advance(float(residual), step_size=float(alpha), context=context))
+        self.iteration = self.recursion.iteration
+        return self.state
+
+
+@dataclass
 class EFORRLSAState:
     weight: np.ndarray
     eigenvalue: np.ndarray
@@ -118,7 +177,6 @@ class LocalPCAUnit:
     center: np.ndarray
     weight: np.ndarray
     eigenvalue: np.ndarray
-    shape: EFORRLSARecursion
     sigma_sqr: float
     activity: float
     lr_state: LearningRateRecursions
@@ -135,6 +193,10 @@ def _orthonormal_columns(matrix: np.ndarray) -> np.ndarray:
 def _orthonormal_columns_svd(matrix: np.ndarray) -> np.ndarray:
     u, _, _ = np.linalg.svd(matrix, full_matrices=False)
     return u
+
+
+def _cvt_field() -> VectorField[np.ndarray, np.ndarray, np.ndarray]:
+    return VectorField(lambda center, x_c, ctx: x_c, name="cvt")
 
 
 def _eforrlsa_field() -> VectorField[EFORRLSAState, EFORRLSAObservation, EFORRLSAState]:
@@ -257,7 +319,6 @@ class NeuralGasPCA:
                     center=center.astype(float),
                     weight=weight.astype(float),
                     eigenvalue=eigenvalue,
-                    shape=EFORRLSARecursion.from_shape(weight, eigenvalue),
                     sigma_sqr=initial_lambda,
                     activity=float(self.params.activity),
                     lr_state=lr_state,
@@ -353,17 +414,18 @@ class NeuralGasPCA:
         context = RecursionContext(iteration=self.iteration, rng=self.rng)
         unit.alpha = unit.lr_state.advance(unit.y.copy(), unit.eigenvalue.copy(), a_lowpass, context) * h
 
-        center_field = VectorField(lambda center, x_c, ctx: x_c, name="center_tracking")
-        center_recursion = Recursion(unit.center, center_field, step_size=unit.alpha, name="unit_center")
-        unit.center = center_recursion.advance(unit.x_c, context)
+        center_recursion = CVTRecursion.from_center(unit.center)
+        unit.center = center_recursion.advance(unit.x_c, unit.alpha, context)
 
-        shape = unit.shape.advance(unit.x_c, unit.y, unit.alpha, context)
+        shape_recursion = EFORRLSARecursion.from_shape(unit.weight, unit.eigenvalue)
+        shape = shape_recursion.advance(unit.x_c, unit.y, unit.alpha, context)
         unit.weight = shape.weight
         unit.eigenvalue = shape.eigenvalue
 
         if n_features != unit.m:
             residual = float(unit.x_c @ unit.x_c - unit.y @ unit.y)
-            unit.sigma_sqr += unit.alpha * (residual - unit.sigma_sqr)
+            residual_variance = ResidualVarianceRecursion.from_sigma_sqr(unit.sigma_sqr)
+            unit.sigma_sqr = residual_variance.advance(residual, unit.alpha, context)
 
 
 def _as_2d(data: np.ndarray) -> np.ndarray:
