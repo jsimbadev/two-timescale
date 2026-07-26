@@ -10,7 +10,7 @@ from .core import (
     ScheduledLearningRate,
     VectorField,
 )
-from .gmm import GMMRecursions, GMMMoments, OnlineGaussianMixture
+from .gmm import GMMRecursions, GMMMoments, GaussianMixtureRecursion
 from .ngpca import (
     DEFAULT_NGPCA_INITIAL_GAIN,
     NGPCAUnitRecursions,
@@ -40,13 +40,13 @@ __all__ = [
     "GMMMomentRecursion",
     "GMMMoments",
     "GMMRecursions",
+    "GaussianMixtureRecursion",
     "LearningRate",
     "LocalPCAGeometry",
     "NGPCAUnitRecursions",
     "NGPCAParameters",
     "NamedPotential",
     "NeuralGasPCA",
-    "OnlineGaussianMixture",
     "PotentialFunction",
     "PotentialName",
     "Recursion",

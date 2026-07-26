@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 from two_timescale.core import LearningRate
-from two_timescale.gmm import GMMRecursions, GMMMoments, OnlineGaussianMixture, moments_to_parameters
+from two_timescale.gmm import GMMRecursions, GMMMoments, GaussianMixtureRecursion, moments_to_parameters
 from two_timescale.recursions import GMMMomentRecursion
 
 
@@ -57,10 +57,15 @@ class GaussianMixtureTests(unittest.TestCase):
             rng.normal(loc=2.0, scale=0.4, size=(64, 2)),
         ])
 
-        model = OnlineGaussianMixture(2, 2, learning_rate=LearningRate(0.05), rng=rng).fit(data, iterations=100)
+        model = GaussianMixtureRecursion(2, 2, learning_rate=LearningRate(0.05), rng=rng)
+        stream = data[[rng.integers(0, len(data)) for _ in range(100)]]
+        model.advance(stream)
         weights, means, covariances = model.parameters()
 
         self.assertFalse(hasattr(model, "learning_rate"))
+        self.assertFalse(hasattr(model, "fit"))
+        self.assertFalse(hasattr(model, "predict"))
+        self.assertFalse(hasattr(model, "predict_proba"))
         self.assertIsInstance(model.recursions.moments, GMMMomentRecursion)
         self.assertEqual(model.recursions.moments.iteration, 100)
         self.assertEqual(model.recursions.moments.recursion.name, "gmm_moments")
@@ -86,6 +91,23 @@ class GaussianMixtureTests(unittest.TestCase):
         for covariance in covariances:
             np.testing.assert_allclose(covariance, covariance.T, atol=1e-12)
             self.assertTrue(np.all(np.linalg.eigvalsh(covariance) > 0.0))
+
+    def test_gmm_recursion_scores_observations_without_predict_api(self) -> None:
+        rng = np.random.default_rng(3)
+        data = np.vstack([
+            rng.normal(loc=-1.0, scale=0.2, size=(8, 2)),
+            rng.normal(loc=1.0, scale=0.2, size=(8, 2)),
+        ])
+
+        model = GaussianMixtureRecursion(2, 2, learning_rate=LearningRate(0.1), rng=rng)
+        model.advance(data)
+
+        responsibilities = model.responsibilities(data[:3])
+        assignments = model.assignments(data[:3])
+
+        self.assertEqual(responsibilities.shape, (3, 2))
+        np.testing.assert_allclose(responsibilities.sum(axis=1), np.ones(3))
+        self.assertEqual(assignments.shape, (3,))
 
 
 if __name__ == "__main__":

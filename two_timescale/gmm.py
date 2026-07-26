@@ -31,8 +31,8 @@ class GMMRecursions:
         )
 
 
-class OnlineGaussianMixture:
-    """Stochastic-approximation Gaussian mixture using moment recursions."""
+class GaussianMixtureRecursion:
+    """Stochastic-approximation Gaussian mixture recursion."""
 
     def __init__(
         self,
@@ -52,13 +52,9 @@ class OnlineGaussianMixture:
             regularization=self.regularization,
         )
 
-    def fit(self, data: np.ndarray, iterations: int | None = None) -> "OnlineGaussianMixture":
-        data = np.asarray(data, dtype=float)
-        if data.ndim != 2 or data.shape[1] != self.n_features:
-            raise ValueError("data must have shape (n_samples, n_features)")
-        count = len(data) if iterations is None else int(iterations)
-        for _ in range(count):
-            x = data[self.rng.integers(0, len(data))]
+    def advance(self, observations: np.ndarray) -> "GaussianMixtureRecursion":
+        data = self._as_observations(observations)
+        for x in data:
             self.recursions.moments.update(
                 x,
                 RecursionContext(iteration=self.recursions.moments.iteration, rng=self.rng),
@@ -80,12 +76,12 @@ class OnlineGaussianMixture:
     def parameters(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         return self.recursions.moments.parameters()
 
-    def predict_proba(self, data: np.ndarray) -> np.ndarray:
-        data = np.asarray(data, dtype=float)
+    def responsibilities(self, observations: np.ndarray) -> np.ndarray:
+        data = self._as_observations(observations)
         return np.vstack([self.recursions.moments.responsibility(x) for x in data])
 
-    def predict(self, data: np.ndarray) -> np.ndarray:
-        return self.predict_proba(data).argmax(axis=1)
+    def assignments(self, observations: np.ndarray) -> np.ndarray:
+        return self.responsibilities(observations).argmax(axis=1)
 
     def _initial_moments(self) -> GMMMoments:
         mass = np.full(self.n_components, 1.0 / self.n_components, dtype=float)
@@ -94,3 +90,11 @@ class OnlineGaussianMixture:
         first = mass[:, None] * means
         second = mass[:, None, None] * (covariances + means[:, :, None] * means[:, None, :])
         return GMMMoments(mass=mass, first=first, second=second)
+
+    def _as_observations(self, observations: np.ndarray) -> np.ndarray:
+        data = np.asarray(observations, dtype=float)
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        if data.ndim != 2 or data.shape[1] != self.n_features:
+            raise ValueError("observations must have shape (n_observations, n_features)")
+        return data

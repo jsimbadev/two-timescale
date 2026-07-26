@@ -1,4 +1,4 @@
-"""Online Gaussian mixture example with the same recursion algebra."""
+"""Gaussian-mixture recursion example with the same recursion algebra."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from two_timescale import LearningRate, OnlineGaussianMixture
+from two_timescale import GaussianMixtureRecursion, LearningRate
 
 
 def make_mixture(seed: int = 1) -> np.ndarray:
@@ -19,21 +19,22 @@ def make_mixture(seed: int = 1) -> np.ndarray:
     return np.vstack([left, right, top])
 
 
-def run() -> tuple[OnlineGaussianMixture, np.ndarray]:
+def run() -> tuple[GaussianMixtureRecursion, np.ndarray]:
     rng = np.random.default_rng(10)
     data = make_mixture(seed=10)
-    model = OnlineGaussianMixture(
+    model = GaussianMixtureRecursion(
         n_components=3,
         n_features=2,
         learning_rate=LearningRate(0.03),
         rng=rng,
     )
-    model.fit(data, iterations=4_000)
+    stream = data[[rng.integers(0, len(data)) for _ in range(4_000)]]
+    model.advance(stream)
     return model, data
 
 
-def plot(model: OnlineGaussianMixture, data: np.ndarray, ax: Any | None = None) -> tuple[Any, Any]:
-    """Plot observations and fitted covariance ellipses for the GMM example."""
+def plot(model: GaussianMixtureRecursion, data: np.ndarray, ax: Any | None = None) -> tuple[Any, Any]:
+    """Plot observations and covariance ellipses for the GMM recursion."""
 
     plt = _load_pyplot()
     if ax is None:
@@ -41,7 +42,7 @@ def plot(model: OnlineGaussianMixture, data: np.ndarray, ax: Any | None = None) 
     else:
         figure = ax.figure
 
-    labels = model.predict(data)
+    labels = model.assignments(data)
     ax.scatter(data[:, 0], data[:, 1], c=labels, s=8, marker="o", alpha=0.35, linewidths=0)
     ax.set_aspect("equal", adjustable="box")
     xlim = ax.get_xlim()
@@ -80,7 +81,7 @@ def _load_pyplot() -> Any:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plot", action="store_true", help="show a Matplotlib plot of the fitted model")
+    parser.add_argument("--plot", action="store_true", help="show a Matplotlib plot of the recursion state")
     parser.add_argument("--save", type=Path, help="write the plot to this path")
     return parser.parse_args()
 
