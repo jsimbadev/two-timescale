@@ -4,7 +4,13 @@ import unittest
 
 import numpy as np
 
-from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
+from two_timescale import (
+    DEFAULT_NGPCA_INITIAL_GAIN,
+    EMARecursion,
+    LearningRate,
+    Recursion,
+    VectorField,
+)
 from two_timescale.gmm import OnlineGaussianMixture
 from two_timescale.ngpca import NeuralGasPCA
 from two_timescale.recursions import (
@@ -119,6 +125,15 @@ class RecursionSmokeTests(unittest.TestCase):
         data = rng.normal(size=(64, 2))
 
         model = NeuralGasPCA(4, rng=rng).initialize(data)
+        np.testing.assert_allclose(
+            [recursions.initial_gain for recursions in model.recursions],
+            DEFAULT_NGPCA_INITIAL_GAIN,
+        )
+        np.testing.assert_allclose(
+            [unit.alpha for unit in model.units],
+            [recursions.adaptive_gain.gain for recursions in model.recursions],
+        )
+
         stream = data[[rng.integers(0, len(data)) for _ in range(20)]]
         model.advance(stream)
 
@@ -151,6 +166,26 @@ class RecursionSmokeTests(unittest.TestCase):
         # by the finite sample, rather than exploding during adaptation.
         self.assertTrue(np.all(eigenvalues > 0.0))
         self.assertLess(eigenvalues.max(), data_scale**2)
+
+    def test_ngpca_json_exports_recursion_state(self) -> None:
+        from examples.ngpca_example import to_matlab_json_dict
+
+        rng = np.random.default_rng(4)
+        data = rng.normal(size=(16, 2))
+
+        model = NeuralGasPCA(2, rng=rng).initialize(data)
+        model.advance(data[:5])
+        payload = to_matlab_json_dict(model)
+
+        first_unit = payload["units"][0]
+        first_gain = model.recursions[0].adaptive_gain
+
+        self.assertEqual(payload["learningRate"], DEFAULT_NGPCA_INITIAL_GAIN)
+        self.assertEqual(len(payload["units"]), 2)
+        np.testing.assert_allclose(first_unit["eta_bar"], first_gain.signal_average.state)
+        np.testing.assert_allclose(first_unit["l_bar"], first_gain.eigenvalue_average.state)
+        np.testing.assert_allclose(first_unit["gamma_bar"], first_gain.innovation_average.state)
+        self.assertEqual(first_unit["epsilon"], first_gain.gain)
 
     def test_gmm_smoke(self) -> None:
         rng = np.random.default_rng(1)

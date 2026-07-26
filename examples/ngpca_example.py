@@ -10,7 +10,12 @@ from typing import Any
 
 import numpy as np
 
-from two_timescale import FreeParameter, NGPCAParameters, NeuralGasPCA
+from two_timescale import (
+    DEFAULT_NGPCA_INITIAL_GAIN,
+    FreeParameter,
+    NGPCAParameters,
+    NeuralGasPCA,
+)
 
 DEFAULT_SAMPLE_NAME = "banana_samples"
 DEFAULT_NUM_UNITS = 4
@@ -166,7 +171,7 @@ def to_matlab_json_dict(model: NeuralGasPCA) -> dict[str, Any]:
     return {
         "potentialFunction": getattr(params.potential_function, "name", params.potential_function),
         "softhard": float(params.softhard),
-        "learningRate": float(params.learning_rate),
+        "learningRate": _initial_gain(model),
         "activity": float(params.activity),
         "rho_init": float(params.rho_init),
         "rho_final": float(params.rho_final),
@@ -177,7 +182,10 @@ def to_matlab_json_dict(model: NeuralGasPCA) -> dict[str, Any]:
         "PCADimensionality": model.pca_dimensionality,
         "iterations": model.iteration,
         "rho": model.rho,
-        "units": [_unit_to_matlab_json_dict(unit) for unit in model.units],
+        "units": [
+            _unit_to_matlab_json_dict(unit, recursions)
+            for unit, recursions in zip(model.units, model.recursions)
+        ],
         "r": model.ranking,
         "CI": [],
         "DU": [],
@@ -187,12 +195,19 @@ def to_matlab_json_dict(model: NeuralGasPCA) -> dict[str, Any]:
     }
 
 
+def _initial_gain(model: NeuralGasPCA) -> float:
+    if not model.recursions:
+        return DEFAULT_NGPCA_INITIAL_GAIN
+    return float(model.recursions[0].initial_gain)
+
+
 def save_matlab_json(model: NeuralGasPCA, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(to_matlab_json_dict(model), separators=(",", ":")))
 
 
-def _unit_to_matlab_json_dict(unit: Any) -> dict[str, Any]:
+def _unit_to_matlab_json_dict(unit: Any, recursions: Any) -> dict[str, Any]:
+    gain = recursions.adaptive_gain
     return {
         "m": unit.m,
         "center": unit.center.tolist(),
@@ -203,11 +218,11 @@ def _unit_to_matlab_json_dict(unit: Any) -> dict[str, Any]:
         "x_c_bar": np.ones(unit.center.size).tolist(),
         "y": unit.y.tolist(),
         "activity": unit.activity,
-        "eta_bar": unit.lr_state.eta_bar.state.tolist(),
-        "l_bar": unit.lr_state.lambda_bar.state.tolist(),
-        "gamma_bar": unit.lr_state.gamma_bar.state.tolist(),
+        "eta_bar": gain.signal_average.state.tolist(),
+        "l_bar": gain.eigenvalue_average.state.tolist(),
+        "gamma_bar": gain.innovation_average.state.tolist(),
         "alpha": unit.alpha,
-        "epsilon": unit.lr_state.epsilon,
+        "epsilon": gain.gain,
         "H": 0,
     }
 

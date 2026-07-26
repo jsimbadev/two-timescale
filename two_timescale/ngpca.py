@@ -18,6 +18,7 @@ from .recursions import (
 )
 
 WeightInitialization = Literal["normal", "uniform"]
+DEFAULT_NGPCA_INITIAL_GAIN = 0.99
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,6 @@ class NGPCAParameters:
 
     potential_function: PotentialSpec = "AR"
     softhard: FreeParameter = FreeParameter(0.0, name="softhard", lower=0.0, upper=1.0)
-    learning_rate: LearningRate = LearningRate(0.99)
     activity: FreeParameter = FreeParameter(1.0, name="activity", lower=0.0, upper=1.0)
     rho_init: FreeParameter = FreeParameter(0.99, name="rho_init", lower=0.0, upper=1.0)
     rho_final: FreeParameter = FreeParameter(0.22, name="rho_final", lower=0.0, upper=1.0)
@@ -50,10 +50,37 @@ class LocalPCAUnit:
 
 @dataclass
 class NGPCAUnitRecursions:
-    learning_rate: AdaptiveGainRecursions
+    adaptive_gain: AdaptiveGainRecursions
     center: StateTrackingRecursion
     shape: EFORRLSARecursion
     residual_variance: ScalarTrackingRecursion
+    initial_gain: float = DEFAULT_NGPCA_INITIAL_GAIN
+
+    @classmethod
+    def new(
+        cls,
+        center: np.ndarray,
+        weight: np.ndarray,
+        eigenvalue: np.ndarray,
+        residual_variance: float,
+        initial_gain: float = DEFAULT_NGPCA_INITIAL_GAIN,
+    ) -> "NGPCAUnitRecursions":
+        gain = float(initial_gain)
+        return cls(
+            adaptive_gain=AdaptiveGainRecursions.new(
+                innovation_average=eigenvalue**2 + eigenvalue,
+                signal_average=eigenvalue**2,
+                eigenvalue_average=eigenvalue,
+                gain=gain,
+            ),
+            center=StateTrackingRecursion.new(center, name="cvt_center"),
+            shape=EFORRLSARecursion.new(EFORRLSAState(weight, eigenvalue)),
+            residual_variance=ScalarTrackingRecursion.new(
+                residual_variance,
+                name="residual_variance",
+            ),
+            initial_gain=gain,
+        )
 
 
 def _orthonormal_columns(matrix: np.ndarray) -> np.ndarray:
@@ -120,6 +147,12 @@ class NeuralGasPCA:
             else:
                 weight = _orthonormal_columns(self.rng.normal(size=(n_features, self.pca_dimensionality)))
             eigenvalue = np.full(self.pca_dimensionality, initial_lambda, dtype=float)
+            recursions = NGPCAUnitRecursions.new(
+                center=center,
+                weight=weight,
+                eigenvalue=eigenvalue,
+                residual_variance=initial_lambda,
+            )
             self.units.append(
                 LocalPCAUnit(
                     m=self.pca_dimensionality,
@@ -130,26 +163,11 @@ class NeuralGasPCA:
                     activity=float(self.params.activity),
                     x_c=np.zeros(n_features, dtype=float),
                     y=np.zeros(self.pca_dimensionality, dtype=float),
-                    alpha=float(self.params.learning_rate),
+                    alpha=recursions.adaptive_gain.gain,
                 )
             )
-            self.recursions.append(
-                NGPCAUnitRecursions(
-                    learning_rate=self._initial_learning_rate_recursions(eigenvalue),
-                    center=StateTrackingRecursion.new(center, name="cvt_center"),
-                    shape=EFORRLSARecursion.new(EFORRLSAState(weight, eigenvalue)),
-                    residual_variance=ScalarTrackingRecursion.new(initial_lambda, name="residual_variance"),
-                )
-            )
+            self.recursions.append(recursions)
         return self
-
-    def _initial_learning_rate_recursions(self, eigenvalue: np.ndarray) -> AdaptiveGainRecursions:
-        return AdaptiveGainRecursions.new(
-            innovation_average=eigenvalue**2 + eigenvalue,
-            signal_average=eigenvalue**2,
-            eigenvalue_average=eigenvalue,
-            gain=float(self.params.learning_rate),
-        )
 
     def advance(self, observations: np.ndarray) -> "NeuralGasPCA":
         data = _as_observations(observations)
@@ -186,7 +204,7 @@ class NeuralGasPCA:
             unit.y = unit.weight.T @ unit.x_c
 
     def _neighborhood_range(self) -> float:
-        average_epsilon = sum(recursions.learning_rate.gain for recursions in self.recursions) / self.number_units
+        average_epsilon = sum(recursions.adaptive_gain.gain for recursions in self.recursions) / self.number_units
         return (
             (float(self.params.rho_init) - float(self.params.rho_final))
             * average_epsilon
@@ -267,7 +285,7 @@ class NeuralGasPCA:
     ) -> None:
         a_lowpass = float(self.params.mu) * h
         context = RecursionContext(iteration=self.iteration, rng=self.rng)
-        unit.alpha = recursions.learning_rate.update(
+        unit.alpha = recursions.adaptive_gain.update(
             signal=unit.y * unit.y,
             eigenvalue=unit.eigenvalue.copy(),
             step_size=a_lowpass,

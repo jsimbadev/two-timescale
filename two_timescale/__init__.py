@@ -12,6 +12,7 @@ from .core import (
 )
 from .gmm import GMMMoments, OnlineGaussianMixture
 from .ngpca import (
+    DEFAULT_NGPCA_INITIAL_GAIN,
     NGPCAUnitRecursions,
     NGPCAParameters,
     NeuralGasPCA,
@@ -29,6 +30,7 @@ from .recursions import (
 __all__ = [
     "AdaptiveGainRecursions",
     "Control",
+    "DEFAULT_NGPCA_INITIAL_GAIN",
     "EMARecursion",
     "EFORRLSAObservation",
     "EFORRLSARecursion",
