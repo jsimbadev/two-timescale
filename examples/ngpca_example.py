@@ -122,7 +122,9 @@ def run(
         rng=rng,
         weight_initialization="uniform",
     )
-    model.initialize(data).fit(data, iterations=iterations)
+    model.initialize(data)
+    stream = data[[rng.integers(0, len(data)) for _ in range(iterations)]]
+    model.advance(stream)
     return model, data
 
 
@@ -162,7 +164,7 @@ def to_matlab_json_dict(model: NeuralGasPCA) -> dict[str, Any]:
     n_features = 0 if not model.units else int(model.units[0].center.size)
 
     return {
-        "potentialFunction": params.potential_function,
+        "potentialFunction": getattr(params.potential_function, "name", params.potential_function),
         "softhard": float(params.softhard),
         "learningRate": float(params.learning_rate),
         "activity": float(params.activity),
@@ -201,9 +203,9 @@ def _unit_to_matlab_json_dict(unit: Any) -> dict[str, Any]:
         "x_c_bar": np.ones(unit.center.size).tolist(),
         "y": unit.y.tolist(),
         "activity": unit.activity,
-        "eta_bar": unit.lr_state.eta_bar.tolist(),
-        "l_bar": unit.lr_state.l_bar.tolist(),
-        "gamma_bar": unit.lr_state.gamma_bar.tolist(),
+        "eta_bar": unit.lr_state.eta_bar.state.tolist(),
+        "l_bar": unit.lr_state.lambda_bar.state.tolist(),
+        "gamma_bar": unit.lr_state.gamma_bar.state.tolist(),
         "alpha": unit.alpha,
         "epsilon": unit.lr_state.epsilon,
         "H": 0,

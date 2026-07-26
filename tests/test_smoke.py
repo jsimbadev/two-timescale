@@ -4,12 +4,41 @@ import unittest
 
 import numpy as np
 
-from two_timescale import LearningRate, Recursion, VectorField
+from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
 from two_timescale.gmm import OnlineGaussianMixture
 from two_timescale.ngpca import NeuralGasPCA
+from two_timescale.potentials import LocalPCAGeometry, NamedPotential, as_potential
 
 
 class RecursionSmokeTests(unittest.TestCase):
+    def test_ema_recursion_tracks_targets_with_per_step_smoothing(self) -> None:
+        ema = EMARecursion(np.array([0.0, 2.0]), step_size=0.25)
+
+        ema.advance(np.array([4.0, -2.0]))
+        np.testing.assert_allclose(ema.state, np.array([1.0, 1.0]))
+
+        ema.advance(np.array([3.0, 5.0]), step_size=0.5)
+        np.testing.assert_allclose(ema.state, np.array([2.0, 3.0]))
+        self.assertEqual(ema.iteration, 2)
+
+    def test_named_and_custom_potentials_are_callable(self) -> None:
+        geometry = LocalPCAGeometry(
+            x_c=np.array([2.0, 1.0]),
+            y=np.array([2.0]),
+            eigenvalue=np.array([4.0]),
+            sigma_sqr=1.0,
+            activity=1.0,
+            pca_dimensionality=1,
+            data_dimensionality=2,
+        )
+
+        named = NamedPotential("N")
+        custom = as_potential(lambda unit_geometry: unit_geometry.activity + unit_geometry.y.sum())
+
+        self.assertGreater(named(geometry), 0.0)
+        self.assertEqual(custom.name, "custom")
+        self.assertEqual(custom(geometry), 3.0)
+
     def test_vector_field_can_be_scaled_by_a_control_recursion(self) -> None:
         control = Recursion(0.5, VectorField(lambda state, obs, ctx: 0.1, name="constant"), step_size=1.0)
         field = VectorField(lambda state, obs, ctx: obs - state, name="tracking") * control
@@ -26,7 +55,9 @@ class RecursionSmokeTests(unittest.TestCase):
         rng = np.random.default_rng(0)
         data = rng.normal(size=(64, 2))
 
-        model = NeuralGasPCA(4, rng=rng).initialize(data).fit(data, iterations=20)
+        model = NeuralGasPCA(4, rng=rng).initialize(data)
+        stream = data[[rng.integers(0, len(data)) for _ in range(20)]]
+        model.advance(stream)
 
         centers = model.centers()
         eigenvalues = np.vstack([unit.eigenvalue for unit in model.units])

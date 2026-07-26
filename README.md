@@ -28,6 +28,30 @@ control.advance(None) # control state is now 0.6
 tracked.advance(2.0)  # 1.6
 ```
 
+`EMARecursion` is the same recursion algebra specialized to exponential moving
+averages:
+
+```python
+from two_timescale import EMARecursion
+
+average = EMARecursion(0.0, step_size=0.1)
+average.advance(5.0)
+```
+
+NGPCA exposes the paper's online update as `advance`. Pass a single observation
+or a two-dimensional stream; the caller owns any random sampling policy.
+
+```python
+from two_timescale import NGPCAParameters, NamedPotential, NeuralGasPCA
+
+model = NeuralGasPCA(
+    4,
+    params=NGPCAParameters(potential_function=NamedPotential("AR", rmax=200.0)),
+)
+model.initialize(data)
+model.advance(data[:100])
+```
+
 ## Examples
 
 Run the NGPCA example with the same DistGen sample source and NGPCA
@@ -77,5 +101,5 @@ uv sync --extra examples
 Run smoke tests:
 
 ```bash
-python -m unittest
+uv run python -m unittest
 ```

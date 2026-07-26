@@ -88,6 +88,10 @@ class ScheduledLearningRate:
         return float(self.initial) / (1.0 + self.decay * iteration) ** self.power
 
 
+def _ema_field() -> "VectorField[Any, Any, Any]":
+    return VectorField(lambda state, target, ctx: add_delta(target, scale_delta(state, -1.0)), name="ema_tracking")
+
+
 def _as_scalar(control: float | Control | Callable[[RecursionContext | None], float],
                context: RecursionContext | None) -> float:
     if isinstance(control, Recursion):
@@ -190,3 +194,41 @@ class Recursion(Generic[State, Observation]):
             return float(np.asarray(selected))
 
         return current_value
+
+
+@dataclass
+class EMARecursion(Generic[State]):
+    """Exponential moving average expressed through the recursion algebra.
+
+    The update is ``state <- state + step_size * (target - state)``.  The
+    optional per-call ``step_size`` lets algorithms use rank-dependent smoothing
+    while keeping the moving average as a persistent recursion object.
+    """
+
+    state: State
+    step_size: float | Control | Callable[[RecursionContext | None], float] = 1.0
+    name: str = "ema"
+    iteration: int = 0
+
+    def __post_init__(self) -> None:
+        self.recursion = Recursion(
+            self.state,
+            _ema_field(),
+            step_size=self.step_size,
+            name=self.name,
+            iteration=self.iteration,
+        )
+
+    def advance(
+        self,
+        target: State,
+        step_size: float | Control | Callable[[RecursionContext | None], float] | None = None,
+        context: RecursionContext | None = None,
+    ) -> State:
+        if step_size is not None:
+            self.recursion.step_size = step_size
+        if context is None:
+            context = RecursionContext(iteration=self.recursion.iteration)
+        self.state = self.recursion.advance(target, context)
+        self.iteration = self.recursion.iteration
+        return self.state

@@ -7,9 +7,9 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .core import FreeParameter, LearningRate, Recursion, RecursionContext, VectorField
+from .core import EMARecursion, FreeParameter, LearningRate, Recursion, RecursionContext, VectorField
+from .potentials import LocalPCAGeometry, PotentialSpec, as_potential
 
-PotentialName = Literal["AR", "N", "H", "AV", "VRV", "VRR"]
 WeightInitialization = Literal["normal", "uniform"]
 
 
@@ -17,7 +17,7 @@ WeightInitialization = Literal["normal", "uniform"]
 class NGPCAParameters:
     """Free parameters matching the MATLAB NGPCA defaults."""
 
-    potential_function: PotentialName = "AR"
+    potential_function: PotentialSpec = "AR"
     softhard: FreeParameter = FreeParameter(0.0, name="softhard", lower=0.0, upper=1.0)
     learning_rate: LearningRate = LearningRate(0.99)
     activity: FreeParameter = FreeParameter(1.0, name="activity", lower=0.0, upper=1.0)
@@ -29,11 +29,40 @@ class NGPCAParameters:
 
 
 @dataclass
-class LearningRateState:
-    gamma_bar: np.ndarray
-    eta_bar: np.ndarray
-    l_bar: np.ndarray
+class LearningRateRecursions:
+    gamma_bar: EMARecursion[np.ndarray]
+    eta_bar: EMARecursion[np.ndarray]
+    lambda_bar: EMARecursion[np.ndarray]
     epsilon: float
+
+    @classmethod
+    def from_initial_lambda(cls, pca_dimensionality: int, initial_lambda: float, epsilon: float) -> "LearningRateRecursions":
+        eigenvalue = np.full(pca_dimensionality, initial_lambda, dtype=float)
+        return cls(
+            gamma_bar=EMARecursion(
+                np.full(pca_dimensionality, initial_lambda**2 + initial_lambda, dtype=float),
+                name="gamma_bar",
+            ),
+            eta_bar=EMARecursion(
+                np.full(pca_dimensionality, initial_lambda**2, dtype=float),
+                name="eta_bar",
+            ),
+            lambda_bar=EMARecursion(eigenvalue.copy(), name="lambda_bar"),
+            epsilon=float(epsilon),
+        )
+
+    def advance(self, y: np.ndarray, eigenvalue: np.ndarray, step_size: float, context: RecursionContext) -> float:
+        eta = y * y
+        gamma = eta - eigenvalue
+
+        self.gamma_bar.advance(gamma, step_size=step_size, context=context)
+        self.eta_bar.advance(eta, step_size=step_size, context=context)
+        self.lambda_bar.advance(eigenvalue, step_size=step_size, context=context)
+
+        denominator = self.eta_bar.state + self.lambda_bar.state
+        normalized = self.gamma_bar.state / np.maximum(denominator, np.finfo(float).eps)
+        self.epsilon = float(np.mean(np.abs(normalized)))
+        return self.epsilon
 
 
 @dataclass
@@ -44,7 +73,7 @@ class LocalPCAUnit:
     eigenvalue: np.ndarray
     sigma_sqr: float
     activity: float
-    lr_state: LearningRateState
+    lr_state: LearningRateRecursions
     x_c: np.ndarray
     y: np.ndarray
     alpha: float
@@ -60,27 +89,12 @@ def _orthonormal_columns_svd(matrix: np.ndarray) -> np.ndarray:
     return u
 
 
-def _learning_rate_field() -> VectorField[LearningRateState, dict[str, np.ndarray], LearningRateState]:
-    def field(state: LearningRateState, observation: dict[str, np.ndarray], context: RecursionContext) -> LearningRateState:
-        y = observation["y"]
-        eigenvalue = observation["eigenvalue"]
-        gamma = y * y - eigenvalue
-        return LearningRateState(
-            gamma_bar=gamma - state.gamma_bar,
-            eta_bar=y * y - state.eta_bar,
-            l_bar=eigenvalue - state.l_bar,
-            epsilon=0.0,
-        )
-
-    return VectorField(field, name="ngpca_learning_rate_control")
-
-
 class NeuralGasPCA:
     """Online neural-gas clustering with local PCA units.
 
-    The implementation follows the update equations in the reference MATLAB
-    code. The adaptive learning rate is represented as its own recursion and
-    is then used as the control for the center/PCA recursions.
+    The adaptive learning rate follows the paper's variance-matching algorithm:
+    gamma_bar, eta_bar, and lambda_bar are each tracked by their own EMA
+    recursion, then combined into a per-unit learning rate.
     """
 
     def __init__(
@@ -94,6 +108,7 @@ class NeuralGasPCA:
         self.number_units = int(number_units)
         self.pca_dimensionality = int(pca_dimensionality)
         self.params = params or NGPCAParameters()
+        self.potential = as_potential(self.params.potential_function, rmax=float(self.params.rmax))
         self.rng = rng or np.random.default_rng()
         self.weight_initialization = weight_initialization
         self.units: list[LocalPCAUnit] = []
@@ -126,10 +141,9 @@ class NeuralGasPCA:
             else:
                 weight = _orthonormal_columns(self.rng.normal(size=(n_features, self.pca_dimensionality)))
             eigenvalue = np.full(self.pca_dimensionality, initial_lambda, dtype=float)
-            lr_state = LearningRateState(
-                gamma_bar=np.full(self.pca_dimensionality, initial_lambda**2 + initial_lambda, dtype=float),
-                eta_bar=np.full(self.pca_dimensionality, initial_lambda**2, dtype=float),
-                l_bar=eigenvalue.copy(),
+            lr_state = LearningRateRecursions.from_initial_lambda(
+                self.pca_dimensionality,
+                initial_lambda,
                 epsilon=float(self.params.learning_rate),
             )
             self.units.append(
@@ -148,26 +162,28 @@ class NeuralGasPCA:
             )
         return self
 
-    def fit(self, data: np.ndarray, iterations: int) -> "NeuralGasPCA":
+    def advance(self, observations: np.ndarray) -> "NeuralGasPCA":
+        data = _as_observations(observations)
         if not self.units:
             self.initialize(data)
-        data = _as_2d(data)
-        for _ in range(int(iterations)):
-            self.fit_single(data[self.rng.integers(0, len(data))])
+        for x in data:
+            self._advance_one(x)
         return self
 
-    def fit_single(self, x: np.ndarray) -> "NeuralGasPCA":
+    def _advance_one(self, x: np.ndarray) -> None:
         if not self.units:
             self.initialize(np.asarray(x, dtype=float)[None, :])
         x = np.asarray(x, dtype=float).reshape(-1)
         n_features = x.size
+        if self.units[0].center.size != n_features:
+            raise ValueError("observation dimensionality must match initialized units")
 
         rankings: list[tuple[int, float]] = []
         total_epsilon = 0.0
         for index, unit in enumerate(self.units):
             unit.x_c = x - unit.center
             unit.y = unit.weight.T @ unit.x_c
-            rankings.append((index, self._potential(unit, n_features)))
+            rankings.append((index, self._score_unit(unit, n_features)))
             total_epsilon += unit.lr_state.epsilon
 
         self.rho = (
@@ -192,7 +208,6 @@ class NeuralGasPCA:
                 unit.activity *= self.number_units / activity_sum
 
         self.iteration += 1
-        return self
 
     def centers(self) -> np.ndarray:
         return np.vstack([unit.center for unit in self.units])
@@ -205,67 +220,36 @@ class NeuralGasPCA:
         result: list[tuple[int, float]] = []
         n_features = x.size
         for index, unit in enumerate(self.units):
-            unit.x_c = x - unit.center
-            unit.y = unit.weight.T @ unit.x_c
-            result.append((index, self._potential(unit, n_features)))
+            result.append((index, self._score_observation(unit, x, n_features)))
         return result
 
-    def _potential(self, unit: LocalPCAUnit, n_features: int) -> float:
-        eigenvalue = np.maximum(unit.eigenvalue, np.finfo(float).eps)
-        basis = float(unit.y @ (unit.y / eigenvalue))
-        lambda_rest = 0.0
-        if unit.m < n_features:
-            lambda_rest = unit.sigma_sqr / (n_features - unit.m)
-            lambda_rest = max(lambda_rest, np.finfo(float).eps)
-            basis += (float(unit.x_c @ unit.x_c) - float(unit.y @ unit.y)) / lambda_rest
+    def _score_observation(self, unit: LocalPCAUnit, x: np.ndarray, n_features: int) -> float:
+        x_c = x - unit.center
+        y = unit.weight.T @ x_c
+        return self.potential(self._geometry(unit, x_c, y, n_features))
 
-        adaptive = float(self.params.rmax) ** (1.0 - min(unit.activity, 1.0))
-        potential = self.params.potential_function
-        if potential == "N":
-            control = 1.0
-        elif potential == "AR":
-            control = adaptive ** -2.0 * float(np.prod(eigenvalue)) ** (1.0 / n_features)
-            if unit.m < n_features:
-                control *= lambda_rest ** ((n_features - unit.m) / n_features)
-        elif potential == "AV":
-            control = (adaptive ** -2.0 * float(np.prod(eigenvalue))) ** (1.0 / n_features)
-            if unit.m < n_features:
-                control *= lambda_rest ** ((n_features - unit.m) / n_features)
-        elif potential == "VRV":
-            control = adaptive ** (-2.0 / n_features)
-        elif potential == "VRR":
-            control = adaptive ** -2.0
-        elif potential == "H":
-            if unit.m < n_features:
-                control = (float(np.prod(eigenvalue)) * lambda_rest ** (n_features - unit.m)) ** (1.0 / n_features)
-            else:
-                control = np.sqrt(float(np.prod(eigenvalue))) ** (2.0 / n_features)
-        else:
-            raise ValueError(f"unknown potential function {potential!r}")
-        return float(basis * control)
+    def _score_unit(self, unit: LocalPCAUnit, n_features: int) -> float:
+        return self.potential(self._geometry(unit, unit.x_c, unit.y, n_features))
+
+    def _geometry(self, unit: LocalPCAUnit, x_c: np.ndarray, y: np.ndarray, n_features: int) -> LocalPCAGeometry:
+        return LocalPCAGeometry(
+            x_c=x_c,
+            y=y,
+            eigenvalue=unit.eigenvalue,
+            sigma_sqr=unit.sigma_sqr,
+            activity=unit.activity,
+            pca_dimensionality=unit.m,
+            data_dimensionality=n_features,
+        )
 
     def _adapt_unit(self, unit: LocalPCAUnit, h: float, n_features: int) -> None:
         a_lowpass = float(self.params.mu) * h
-
-        lr_recursion = Recursion(
-            unit.lr_state,
-            _learning_rate_field(),
-            step_size=a_lowpass,
-            name="epsilon_control",
-            iteration=self.iteration,
-        )
-        unit.lr_state = lr_recursion.advance(
-            {"y": unit.y.copy(), "eigenvalue": unit.eigenvalue.copy()},
-            RecursionContext(iteration=self.iteration, rng=self.rng),
-        )
-        denominator = unit.lr_state.eta_bar + unit.lr_state.l_bar
-        gamma = unit.lr_state.gamma_bar / np.maximum(denominator, np.finfo(float).eps)
-        unit.lr_state.epsilon = float(np.mean(np.abs(gamma)))
-        unit.alpha = unit.lr_state.epsilon * h
+        context = RecursionContext(iteration=self.iteration, rng=self.rng)
+        unit.alpha = unit.lr_state.advance(unit.y.copy(), unit.eigenvalue.copy(), a_lowpass, context) * h
 
         center_field = VectorField(lambda center, x_c, ctx: x_c, name="center_tracking")
         center_recursion = Recursion(unit.center, center_field, step_size=unit.alpha, name="unit_center")
-        unit.center = center_recursion.advance(unit.x_c, RecursionContext(iteration=self.iteration, rng=self.rng))
+        unit.center = center_recursion.advance(unit.x_c, context)
 
         self._eforrlsa(unit)
 
@@ -313,3 +297,12 @@ def _as_2d(data: np.ndarray) -> np.ndarray:
     if data.ndim != 2:
         raise ValueError("data must be a two-dimensional array")
     return data
+
+
+def _as_observations(observations: np.ndarray) -> np.ndarray:
+    data = np.asarray(observations, dtype=float)
+    if data.ndim == 1:
+        return data.reshape(1, -1)
+    if data.ndim == 2:
+        return data
+    raise ValueError("observations must be a one- or two-dimensional array")
