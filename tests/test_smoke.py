@@ -32,13 +32,13 @@ class RecursionSmokeTests(unittest.TestCase):
         rates = AdaptiveGainRecursions.new(
             innovation_average=np.array([2.0]),
             signal_average=np.array([1.0]),
-            scale_average=np.array([1.0]),
+            eigenvalue_average=np.array([1.0]),
             gain=0.5,
         )
 
         gain = rates.update(
             signal=np.array([4.0]),
-            scale=np.array([3.0]),
+            eigenvalue=np.array([3.0]),
             step_size=0.25,
             context=None,
         )
@@ -46,7 +46,7 @@ class RecursionSmokeTests(unittest.TestCase):
         self.assertAlmostEqual(gain, 1.75 / 3.25)
         self.assertEqual(rates.innovation_average.iteration, 1)
         self.assertEqual(rates.signal_average.iteration, 1)
-        self.assertEqual(rates.scale_average.iteration, 1)
+        self.assertEqual(rates.eigenvalue_average.iteration, 1)
 
     def test_named_and_custom_potentials_are_callable(self) -> None:
         geometry = LocalPCAGeometry(

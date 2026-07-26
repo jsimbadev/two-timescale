@@ -147,7 +147,7 @@ class NeuralGasPCA:
         return AdaptiveGainRecursions.new(
             innovation_average=eigenvalue**2 + eigenvalue,
             signal_average=eigenvalue**2,
-            scale_average=eigenvalue,
+            eigenvalue_average=eigenvalue,
             gain=float(self.params.learning_rate),
         )
 
@@ -267,7 +267,12 @@ class NeuralGasPCA:
     ) -> None:
         a_lowpass = float(self.params.mu) * h
         context = RecursionContext(iteration=self.iteration, rng=self.rng)
-        unit.alpha = recursions.learning_rate.update(unit.y * unit.y, unit.eigenvalue.copy(), a_lowpass, context) * h
+        unit.alpha = recursions.learning_rate.update(
+            signal=unit.y * unit.y,
+            eigenvalue=unit.eigenvalue.copy(),
+            step_size=a_lowpass,
+            context=context,
+        ) * h
 
         unit.center = recursions.center.update(unit.x_c, unit.alpha, context)
 
