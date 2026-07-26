@@ -36,22 +36,27 @@ class LearningRateRecursions:
     epsilon: float
 
     @classmethod
-    def from_initial_lambda(cls, pca_dimensionality: int, initial_lambda: float, epsilon: float) -> "LearningRateRecursions":
-        eigenvalue = np.full(pca_dimensionality, initial_lambda, dtype=float)
+    def new(
+        cls,
+        gamma_bar: np.ndarray,
+        eta_bar: np.ndarray,
+        lambda_bar: np.ndarray,
+        epsilon: float,
+    ) -> "LearningRateRecursions":
         return cls(
-            gamma_bar=EMARecursion(
-                np.full(pca_dimensionality, initial_lambda**2 + initial_lambda, dtype=float),
-                name="gamma_bar",
-            ),
-            eta_bar=EMARecursion(
-                np.full(pca_dimensionality, initial_lambda**2, dtype=float),
-                name="eta_bar",
-            ),
-            lambda_bar=EMARecursion(eigenvalue.copy(), name="lambda_bar"),
+            gamma_bar=EMARecursion(np.array(gamma_bar, dtype=float, copy=True), name="gamma_bar"),
+            eta_bar=EMARecursion(np.array(eta_bar, dtype=float, copy=True), name="eta_bar"),
+            lambda_bar=EMARecursion(np.array(lambda_bar, dtype=float, copy=True), name="lambda_bar"),
             epsilon=float(epsilon),
         )
 
-    def advance(self, y: np.ndarray, eigenvalue: np.ndarray, step_size: float, context: RecursionContext) -> float:
+    def update(
+        self,
+        y: np.ndarray,
+        eigenvalue: np.ndarray,
+        step_size: float,
+        context: RecursionContext | None = None,
+    ) -> float:
         eta = y * y
         gamma = eta - eigenvalue
 
@@ -72,20 +77,21 @@ class CVTRecursion:
     state: np.ndarray
     iteration: int = 0
 
+    @classmethod
+    def new(cls, state: np.ndarray) -> "CVTRecursion":
+        return cls(state)
+
     def __post_init__(self) -> None:
+        self.state = np.array(self.state, dtype=float, copy=True)
         self.recursion = Recursion(
-            self.state.copy(),
+            self.state,
             _cvt_field(),
             step_size=1.0,
             name="cvt_center",
             iteration=self.iteration,
         )
 
-    @classmethod
-    def from_center(cls, center: np.ndarray) -> "CVTRecursion":
-        return cls(center.copy())
-
-    def advance(
+    def update(
         self,
         x_c: np.ndarray,
         alpha: float,
@@ -106,14 +112,14 @@ class ResidualVarianceRecursion:
     state: float
     iteration: int = 0
 
+    @classmethod
+    def new(cls, state: float) -> "ResidualVarianceRecursion":
+        return cls(state)
+
     def __post_init__(self) -> None:
         self.recursion = EMARecursion(float(self.state), name="residual_variance", iteration=self.iteration)
 
-    @classmethod
-    def from_sigma_sqr(cls, sigma_sqr: float) -> "ResidualVarianceRecursion":
-        return cls(float(sigma_sqr))
-
-    def advance(
+    def update(
         self,
         residual: float,
         alpha: float,
@@ -144,7 +150,15 @@ class EFORRLSARecursion:
     state: EFORRLSAState
     iteration: int = 0
 
+    @classmethod
+    def new(cls, state: EFORRLSAState) -> "EFORRLSARecursion":
+        return cls(state)
+
     def __post_init__(self) -> None:
+        self.state = EFORRLSAState(
+            weight=np.array(self.state.weight, dtype=float, copy=True),
+            eigenvalue=np.array(self.state.eigenvalue, dtype=float, copy=True),
+        )
         self.recursion = Recursion(
             self.state,
             _eforrlsa_field(),
@@ -153,11 +167,7 @@ class EFORRLSARecursion:
             iteration=self.iteration,
         )
 
-    @classmethod
-    def from_shape(cls, weight: np.ndarray, eigenvalue: np.ndarray) -> "EFORRLSARecursion":
-        return cls(EFORRLSAState(weight=weight.copy(), eigenvalue=eigenvalue.copy()))
-
-    def advance(
+    def update(
         self,
         x_c: np.ndarray,
         y: np.ndarray,
@@ -179,10 +189,17 @@ class LocalPCAUnit:
     eigenvalue: np.ndarray
     sigma_sqr: float
     activity: float
-    lr_state: LearningRateRecursions
     x_c: np.ndarray
     y: np.ndarray
     alpha: float
+
+
+@dataclass
+class LocalPCARecursions:
+    learning_rate: LearningRateRecursions
+    center: CVTRecursion
+    shape: EFORRLSARecursion
+    residual_variance: ResidualVarianceRecursion
 
 
 def _orthonormal_columns(matrix: np.ndarray) -> np.ndarray:
@@ -279,6 +296,7 @@ class NeuralGasPCA:
         self.rng = rng or np.random.default_rng()
         self.weight_initialization = weight_initialization
         self.units: list[LocalPCAUnit] = []
+        self.recursions: list[LocalPCARecursions] = []
         self.rho = float(self.params.rho_init)
         self.ranking: list[list[float]] = []
         self.iteration = 0
@@ -297,6 +315,7 @@ class NeuralGasPCA:
         initial_lambda = float(self.params.initial_eigenvalue)
 
         self.units = []
+        self.recursions = []
         for _ in range(self.number_units):
             if n_samples == 1:
                 center = data[0] * self.rng.random(n_features)
@@ -308,11 +327,6 @@ class NeuralGasPCA:
             else:
                 weight = _orthonormal_columns(self.rng.normal(size=(n_features, self.pca_dimensionality)))
             eigenvalue = np.full(self.pca_dimensionality, initial_lambda, dtype=float)
-            lr_state = LearningRateRecursions.from_initial_lambda(
-                self.pca_dimensionality,
-                initial_lambda,
-                epsilon=float(self.params.learning_rate),
-            )
             self.units.append(
                 LocalPCAUnit(
                     m=self.pca_dimensionality,
@@ -321,13 +335,28 @@ class NeuralGasPCA:
                     eigenvalue=eigenvalue,
                     sigma_sqr=initial_lambda,
                     activity=float(self.params.activity),
-                    lr_state=lr_state,
                     x_c=np.zeros(n_features, dtype=float),
                     y=np.zeros(self.pca_dimensionality, dtype=float),
                     alpha=float(self.params.learning_rate),
                 )
             )
+            self.recursions.append(
+                LocalPCARecursions(
+                    learning_rate=self._initial_learning_rate_recursions(eigenvalue),
+                    center=CVTRecursion.new(center),
+                    shape=EFORRLSARecursion.new(EFORRLSAState(weight, eigenvalue)),
+                    residual_variance=ResidualVarianceRecursion.new(initial_lambda),
+                )
+            )
         return self
+
+    def _initial_learning_rate_recursions(self, eigenvalue: np.ndarray) -> LearningRateRecursions:
+        return LearningRateRecursions.new(
+            gamma_bar=eigenvalue**2 + eigenvalue,
+            eta_bar=eigenvalue**2,
+            lambda_bar=eigenvalue,
+            epsilon=float(self.params.learning_rate),
+        )
 
     def advance(self, observations: np.ndarray) -> "NeuralGasPCA":
         data = _as_observations(observations)
@@ -364,7 +393,7 @@ class NeuralGasPCA:
             unit.y = unit.weight.T @ unit.x_c
 
     def _neighborhood_range(self) -> float:
-        average_epsilon = sum(unit.lr_state.epsilon for unit in self.units) / self.number_units
+        average_epsilon = sum(recursions.learning_rate.epsilon for recursions in self.recursions) / self.number_units
         return (
             (float(self.params.rho_init) - float(self.params.rho_final))
             * average_epsilon
@@ -395,7 +424,7 @@ class NeuralGasPCA:
             self.units[index].activity += float(self.params.mu) * h
             if h < float(self.params.softhard):
                 break
-            self._adapt_unit(self.units[index], h=h, n_features=n_features)
+            self._adapt_unit(self.units[index], self.recursions[index], h=h, n_features=n_features)
 
     def _normalize_activity(self) -> None:
         activity_sum = sum(unit.activity for unit in self.units)
@@ -436,23 +465,26 @@ class NeuralGasPCA:
             data_dimensionality=n_features,
         )
 
-    def _adapt_unit(self, unit: LocalPCAUnit, h: float, n_features: int) -> None:
+    def _adapt_unit(
+        self,
+        unit: LocalPCAUnit,
+        recursions: LocalPCARecursions,
+        h: float,
+        n_features: int,
+    ) -> None:
         a_lowpass = float(self.params.mu) * h
         context = RecursionContext(iteration=self.iteration, rng=self.rng)
-        unit.alpha = unit.lr_state.advance(unit.y.copy(), unit.eigenvalue.copy(), a_lowpass, context) * h
+        unit.alpha = recursions.learning_rate.update(unit.y.copy(), unit.eigenvalue.copy(), a_lowpass, context) * h
 
-        center_recursion = CVTRecursion.from_center(unit.center)
-        unit.center = center_recursion.advance(unit.x_c, unit.alpha, context)
+        unit.center = recursions.center.update(unit.x_c, unit.alpha, context)
 
-        shape_recursion = EFORRLSARecursion.from_shape(unit.weight, unit.eigenvalue)
-        shape = shape_recursion.advance(unit.x_c, unit.y, unit.alpha, context)
+        shape = recursions.shape.update(unit.x_c, unit.y, unit.alpha, context)
         unit.weight = shape.weight
         unit.eigenvalue = shape.eigenvalue
 
         if n_features != unit.m:
             residual = float(unit.x_c @ unit.x_c - unit.y @ unit.y)
-            residual_variance = ResidualVarianceRecursion.from_sigma_sqr(unit.sigma_sqr)
-            unit.sigma_sqr = residual_variance.advance(residual, unit.alpha, context)
+            unit.sigma_sqr = recursions.residual_variance.update(residual, unit.alpha, context)
 
 
 def _as_2d(data: np.ndarray) -> np.ndarray:
