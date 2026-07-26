@@ -338,43 +338,70 @@ class NeuralGasPCA:
         return self
 
     def _advance_one(self, x: np.ndarray) -> None:
+        observation = self._validate_observation(x)
+        n_features = observation.size
+
+        self._project_units(observation)
+        self.rho = self._neighborhood_range()
+        rankings = self._rank_units(n_features)
+        neighborhoods = self._neighborhood_weights()
+
+        self._adapt_ranked_units(rankings, neighborhoods, n_features)
+        self._normalize_activity()
+        self.iteration += 1
+
+    def _validate_observation(self, x: np.ndarray) -> np.ndarray:
         if not self.units:
             self.initialize(np.asarray(x, dtype=float)[None, :])
-        x = np.asarray(x, dtype=float).reshape(-1)
-        n_features = x.size
-        if self.units[0].center.size != n_features:
+        observation = np.asarray(x, dtype=float).reshape(-1)
+        if self.units[0].center.size != observation.size:
             raise ValueError("observation dimensionality must match initialized units")
+        return observation
 
-        rankings: list[tuple[int, float]] = []
-        total_epsilon = 0.0
-        for index, unit in enumerate(self.units):
+    def _project_units(self, x: np.ndarray) -> None:
+        for unit in self.units:
             unit.x_c = x - unit.center
             unit.y = unit.weight.T @ unit.x_c
-            rankings.append((index, self._score_unit(unit, n_features)))
-            total_epsilon += unit.lr_state.epsilon
 
-        self.rho = (
+    def _neighborhood_range(self) -> float:
+        average_epsilon = sum(unit.lr_state.epsilon for unit in self.units) / self.number_units
+        return (
             (float(self.params.rho_init) - float(self.params.rho_final))
-            * total_epsilon
-            / self.number_units
+            * average_epsilon
             + float(self.params.rho_final)
         )
+
+    def _rank_units(self, n_features: int) -> list[tuple[int, float]]:
+        rankings = [
+            (index, self._score_unit(unit, n_features))
+            for index, unit in enumerate(self.units)
+        ]
         rankings.sort(key=lambda item: item[1])
         self.ranking = [[float(index + 1), float(potential)] for index, potential in rankings]
-        h = np.exp((1.0 - np.arange(1, self.number_units + 1)) / max(self.rho, 1e-12))
+        return rankings
 
+    def _neighborhood_weights(self) -> np.ndarray:
+        ranks = np.arange(1, self.number_units + 1)
+        return np.exp((1.0 - ranks) / max(self.rho, 1e-12))
+
+    def _adapt_ranked_units(
+        self,
+        rankings: list[tuple[int, float]],
+        neighborhoods: np.ndarray,
+        n_features: int,
+    ) -> None:
         for rank, (index, _) in enumerate(rankings):
-            self.units[index].activity += float(self.params.mu) * float(h[rank])
-            if h[rank] < float(self.params.softhard):
+            h = float(neighborhoods[rank])
+            self.units[index].activity += float(self.params.mu) * h
+            if h < float(self.params.softhard):
                 break
-            self._adapt_unit(self.units[index], h=float(h[rank]), n_features=n_features)
+            self._adapt_unit(self.units[index], h=h, n_features=n_features)
 
+    def _normalize_activity(self) -> None:
         activity_sum = sum(unit.activity for unit in self.units)
         if activity_sum > 0.0:
             for unit in self.units:
                 unit.activity *= self.number_units / activity_sum
-
-        self.iteration += 1
 
     def centers(self) -> np.ndarray:
         return np.vstack([unit.center for unit in self.units])
