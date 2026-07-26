@@ -6,7 +6,7 @@ import numpy as np
 
 from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
 from two_timescale.gmm import OnlineGaussianMixture
-from two_timescale.ngpca import NeuralGasPCA
+from two_timescale.ngpca import EFORRLSARecursion, NeuralGasPCA
 from two_timescale.potentials import LocalPCAGeometry, NamedPotential, as_potential
 
 
@@ -38,6 +38,24 @@ class RecursionSmokeTests(unittest.TestCase):
         self.assertGreater(named(geometry), 0.0)
         self.assertEqual(custom.name, "custom")
         self.assertEqual(custom(geometry), 3.0)
+
+    def test_eforrlsa_recursion_updates_pca_shape(self) -> None:
+        shape = EFORRLSARecursion.from_shape(
+            weight=np.eye(2),
+            eigenvalue=np.array([1.0, 0.5]),
+        )
+
+        state = shape.advance(
+            x_c=np.array([1.0, 2.0]),
+            y=np.array([1.0, 2.0]),
+            alpha=0.2,
+        )
+
+        self.assertEqual(state.weight.shape, (2, 2))
+        self.assertEqual(state.eigenvalue.shape, (2,))
+        self.assertTrue(np.isfinite(state.weight).all())
+        self.assertTrue(np.all(state.eigenvalue > 0.0))
+        self.assertEqual(shape.iteration, 1)
 
     def test_vector_field_can_be_scaled_by_a_control_recursion(self) -> None:
         control = Recursion(0.5, VectorField(lambda state, obs, ctx: 0.1, name="constant"), step_size=1.0)

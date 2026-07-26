@@ -39,7 +39,9 @@ average.advance(5.0)
 ```
 
 NGPCA exposes the paper's online update as `advance`. Pass a single observation
-or a two-dimensional stream; the caller owns any random sampling policy.
+or a two-dimensional stream; the caller owns any random sampling policy. Inside
+each local PCA unit, the adaptive learning-rate filters are `EMARecursion`
+objects and the EFORRLSA shape update is an `EFORRLSARecursion`.
 
 ```python
 from two_timescale import NGPCAParameters, NamedPotential, NeuralGasPCA

@@ -66,11 +66,59 @@ class LearningRateRecursions:
 
 
 @dataclass
+class EFORRLSAState:
+    weight: np.ndarray
+    eigenvalue: np.ndarray
+
+
+@dataclass(frozen=True)
+class EFORRLSAObservation:
+    x_c: np.ndarray
+    y: np.ndarray
+    alpha: float
+
+
+@dataclass
+class EFORRLSARecursion:
+    """Robust recursive least-squares PCA shape update as a recursion."""
+
+    state: EFORRLSAState
+    iteration: int = 0
+
+    def __post_init__(self) -> None:
+        self.recursion = Recursion(
+            self.state,
+            _eforrlsa_field(),
+            step_size=1.0,
+            name="eforrlsa_shape",
+            iteration=self.iteration,
+        )
+
+    @classmethod
+    def from_shape(cls, weight: np.ndarray, eigenvalue: np.ndarray) -> "EFORRLSARecursion":
+        return cls(EFORRLSAState(weight=weight.copy(), eigenvalue=eigenvalue.copy()))
+
+    def advance(
+        self,
+        x_c: np.ndarray,
+        y: np.ndarray,
+        alpha: float,
+        context: RecursionContext | None = None,
+    ) -> EFORRLSAState:
+        if context is None:
+            context = RecursionContext(iteration=self.recursion.iteration)
+        self.state = self.recursion.advance(EFORRLSAObservation(x_c=x_c, y=y, alpha=float(alpha)), context)
+        self.iteration = self.recursion.iteration
+        return self.state
+
+
+@dataclass
 class LocalPCAUnit:
     m: int
     center: np.ndarray
     weight: np.ndarray
     eigenvalue: np.ndarray
+    shape: EFORRLSARecursion
     sigma_sqr: float
     activity: float
     lr_state: LearningRateRecursions
@@ -87,6 +135,63 @@ def _orthonormal_columns(matrix: np.ndarray) -> np.ndarray:
 def _orthonormal_columns_svd(matrix: np.ndarray) -> np.ndarray:
     u, _, _ = np.linalg.svd(matrix, full_matrices=False)
     return u
+
+
+def _eforrlsa_field() -> VectorField[EFORRLSAState, EFORRLSAObservation, EFORRLSAState]:
+    def field(state: EFORRLSAState, observation: EFORRLSAObservation, context: RecursionContext) -> EFORRLSAState:
+        return _eforrlsa_delta(state, observation)
+
+    return VectorField(field, name="eforrlsa")
+
+
+def _eforrlsa_delta(state: EFORRLSAState, observation: EFORRLSAObservation) -> EFORRLSAState:
+    next_state = _eforrlsa_next_state(state, observation)
+    return EFORRLSAState(
+        weight=next_state.weight - state.weight,
+        eigenvalue=next_state.eigenvalue - state.eigenvalue,
+    )
+
+
+def _eforrlsa_next_state(state: EFORRLSAState, observation: EFORRLSAObservation) -> EFORRLSAState:
+    weight = state.weight.copy()
+    old_weight = state.weight.copy()
+    eigenvalue = state.eigenvalue
+    x_c = observation.x_c
+    y = observation.y
+    alpha = observation.alpha
+    m = eigenvalue.size
+
+    l2 = np.zeros(m, dtype=float)
+    p = np.zeros(m, dtype=float)
+    q = np.zeros((m, m), dtype=float)
+    r = np.zeros((m, m), dtype=float)
+    t = 0.0
+    d = float(x_c @ x_c)
+
+    for i in range(m):
+        alpha_l = (1.0 - alpha) * eigenvalue[i]
+        beta_y = alpha * y[i]
+        if i > 0:
+            t += p[i - 1] * p[i - 1]
+            d = max(0.0, d - y[i - 1] * y[i - 1])
+
+        s = (alpha_l + alpha * d) * y[i]
+        l2[i] = alpha_l * alpha_l + beta_y * (alpha_l * y[i] + s)
+        n2 = max(float(l2[i] - s * s * t), np.finfo(float).eps)
+        n = np.sqrt(n2)
+        p[i] = (beta_y - s * t) / n
+
+        column = p[i] * x_c
+        for j in range(i + 1):
+            if j < i:
+                r[i, j] = r[i - 1, j] + p[i - 1] * q[i - 1, j]
+                q[i, j] = -(beta_y * y[j] + s * r[i, j]) / n
+            else:
+                q[i, j] = alpha_l / n
+            column = column + q[i, j] * old_weight[:, j]
+        weight[:, i] = column
+
+    return EFORRLSAState(weight=weight, eigenvalue=np.sqrt(np.maximum(l2, 0.0)))
 
 
 class NeuralGasPCA:
@@ -152,6 +257,7 @@ class NeuralGasPCA:
                     center=center.astype(float),
                     weight=weight.astype(float),
                     eigenvalue=eigenvalue,
+                    shape=EFORRLSARecursion.from_shape(weight, eigenvalue),
                     sigma_sqr=initial_lambda,
                     activity=float(self.params.activity),
                     lr_state=lr_state,
@@ -251,45 +357,13 @@ class NeuralGasPCA:
         center_recursion = Recursion(unit.center, center_field, step_size=unit.alpha, name="unit_center")
         unit.center = center_recursion.advance(unit.x_c, context)
 
-        self._eforrlsa(unit)
+        shape = unit.shape.advance(unit.x_c, unit.y, unit.alpha, context)
+        unit.weight = shape.weight
+        unit.eigenvalue = shape.eigenvalue
 
         if n_features != unit.m:
             residual = float(unit.x_c @ unit.x_c - unit.y @ unit.y)
             unit.sigma_sqr += unit.alpha * (residual - unit.sigma_sqr)
-
-    def _eforrlsa(self, unit: LocalPCAUnit) -> None:
-        old_weight = unit.weight.copy()
-        l2 = np.zeros(unit.m, dtype=float)
-        p = np.zeros(unit.m, dtype=float)
-        q = np.zeros((unit.m, unit.m), dtype=float)
-        r = np.zeros((unit.m, unit.m), dtype=float)
-        t = 0.0
-        d = float(unit.x_c @ unit.x_c)
-
-        for i in range(unit.m):
-            alpha_l = (1.0 - unit.alpha) * unit.eigenvalue[i]
-            beta_y = unit.alpha * unit.y[i]
-            if i > 0:
-                t += p[i - 1] * p[i - 1]
-                d = max(0.0, d - unit.y[i - 1] * unit.y[i - 1])
-
-            s = (alpha_l + unit.alpha * d) * unit.y[i]
-            l2[i] = alpha_l * alpha_l + beta_y * (alpha_l * unit.y[i] + s)
-            n2 = max(float(l2[i] - s * s * t), np.finfo(float).eps)
-            n = np.sqrt(n2)
-            p[i] = (beta_y - s * t) / n
-
-            column = p[i] * unit.x_c
-            for j in range(i + 1):
-                if j < i:
-                    r[i, j] = r[i - 1, j] + p[i - 1] * q[i - 1, j]
-                    q[i, j] = -(beta_y * unit.y[j] + s * r[i, j]) / n
-                else:
-                    q[i, j] = alpha_l / n
-                column = column + q[i, j] * old_weight[:, j]
-            unit.weight[:, i] = column
-
-        unit.eigenvalue = np.sqrt(np.maximum(l2, 0.0))
 
 
 def _as_2d(data: np.ndarray) -> np.ndarray:
