@@ -10,7 +10,7 @@ from .core import (
     ScheduledLearningRate,
     VectorField,
 )
-from .gmm import GMMMoments, OnlineGaussianMixture
+from .gmm import GMMRecursions, GMMMoments, OnlineGaussianMixture
 from .ngpca import (
     DEFAULT_NGPCA_INITIAL_GAIN,
     NGPCAUnitRecursions,
@@ -23,6 +23,7 @@ from .recursions import (
     EFORRLSAObservation,
     EFORRLSARecursion,
     EFORRLSAState,
+    GMMMomentRecursion,
     ScalarTrackingRecursion,
     StateTrackingRecursion,
 )
@@ -36,7 +37,9 @@ __all__ = [
     "EFORRLSARecursion",
     "EFORRLSAState",
     "FreeParameter",
+    "GMMMomentRecursion",
     "GMMMoments",
+    "GMMRecursions",
     "LearningRate",
     "LocalPCAGeometry",
     "NGPCAUnitRecursions",

@@ -8,6 +8,12 @@ import two_timescale
 import two_timescale.recursions as recursions
 from two_timescale.recursions.adaptive_gain import AdaptiveGainRecursions
 from two_timescale.recursions.eforrlsa import EFORRLSAObservation, EFORRLSARecursion, EFORRLSAState
+from two_timescale.recursions.gmm_moments import (
+    GMMMomentRecursion,
+    GMMMoments,
+    moments_to_parameters,
+    responsibilities,
+)
 from two_timescale.recursions.scalar_tracking import ScalarTrackingRecursion
 from two_timescale.recursions.state_tracking import StateTrackingRecursion
 
@@ -18,10 +24,14 @@ class SplitRecursionModuleTests(unittest.TestCase):
         self.assertIs(recursions.EFORRLSAObservation, EFORRLSAObservation)
         self.assertIs(recursions.EFORRLSARecursion, EFORRLSARecursion)
         self.assertIs(recursions.EFORRLSAState, EFORRLSAState)
+        self.assertIs(recursions.GMMMomentRecursion, GMMMomentRecursion)
+        self.assertIs(recursions.GMMMoments, GMMMoments)
         self.assertIs(recursions.ScalarTrackingRecursion, ScalarTrackingRecursion)
         self.assertIs(recursions.StateTrackingRecursion, StateTrackingRecursion)
         self.assertIs(two_timescale.AdaptiveGainRecursions, AdaptiveGainRecursions)
         self.assertIs(two_timescale.EFORRLSARecursion, EFORRLSARecursion)
+        self.assertIs(two_timescale.GMMMomentRecursion, GMMMomentRecursion)
+        self.assertIs(two_timescale.GMMMoments, GMMMoments)
         self.assertIs(two_timescale.ScalarTrackingRecursion, ScalarTrackingRecursion)
         self.assertIs(two_timescale.StateTrackingRecursion, StateTrackingRecursion)
 
@@ -102,6 +112,47 @@ class SplitRecursionModuleTests(unittest.TestCase):
         self.assertTrue(np.all(state.eigenvalue > 0.0))
         self.assertEqual(shape.recursion.name, "eforrlsa_shape")
         self.assertEqual(shape.iteration, 1)
+
+    def test_gmm_moment_recursion_updates_sufficient_statistics(self) -> None:
+        initial = GMMMoments(
+            mass=np.array([0.5, 0.5]),
+            first=np.array([[-0.5, 0.0], [0.5, 0.0]]),
+            second=np.tile(np.eye(2), (2, 1, 1)),
+        )
+        moments = GMMMomentRecursion.new(initial, regularization=1e-4)
+
+        updated = moments.update(np.array([-1.0, 0.25]))
+
+        self.assertIs(updated, moments.state)
+        self.assertEqual(moments.recursion.name, "gmm_moments")
+        self.assertEqual(moments.iteration, 1)
+        self.assertTrue(np.isfinite(updated.mass).all())
+        self.assertTrue(np.isfinite(updated.first).all())
+        self.assertTrue(np.isfinite(updated.second).all())
+        self.assertAlmostEqual(updated.mass.sum(), 1.0)
+
+        weights, means, covariances = moments.parameters()
+        self.assertEqual(weights.shape, (2,))
+        self.assertEqual(means.shape, (2, 2))
+        self.assertEqual(covariances.shape, (2, 2, 2))
+
+    def test_gmm_responsibilities_are_probabilities(self) -> None:
+        state = GMMMoments(
+            mass=np.array([0.25, 0.75]),
+            first=np.array([[-0.5, 0.0], [1.5, 0.0]]),
+            second=np.array([
+                [[1.25, 0.0], [0.0, 0.25]],
+                [[3.75, 0.0], [0.0, 0.75]],
+            ]),
+        )
+        weights, means, covariances = moments_to_parameters(state)
+
+        responsibility = responsibilities(np.array([2.0, 0.0]), weights, means, covariances)
+
+        self.assertEqual(responsibility.shape, (2,))
+        self.assertAlmostEqual(float(responsibility.sum()), 1.0)
+        self.assertTrue(np.all(responsibility >= 0.0))
+        self.assertGreater(responsibility[1], responsibility[0])
 
 
 if __name__ == "__main__":

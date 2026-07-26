@@ -5,10 +5,32 @@ import unittest
 import numpy as np
 
 from two_timescale.core import LearningRate
-from two_timescale.gmm import GMMMoments, OnlineGaussianMixture, moments_to_parameters
+from two_timescale.gmm import GMMRecursions, GMMMoments, OnlineGaussianMixture, moments_to_parameters
+from two_timescale.recursions import GMMMomentRecursion
 
 
 class GaussianMixtureTests(unittest.TestCase):
+    def test_gmm_recursions_construct_named_moment_recursion(self) -> None:
+        moments = GMMMoments(
+            mass=np.array([0.5, 0.5]),
+            first=np.array([[0.0, 0.0], [1.0, 1.0]]),
+            second=np.tile(np.eye(2), (2, 1, 1)),
+        )
+
+        recursions = GMMRecursions.new(
+            moments,
+            learning_rate=LearningRate(0.2),
+            regularization=1e-4,
+        )
+
+        self.assertIsInstance(recursions.moments, GMMMomentRecursion)
+        self.assertEqual(recursions.moments.name, "gmm_moments")
+        self.assertEqual(float(recursions.moments.learning_rate), 0.2)
+        self.assertEqual(recursions.moments.regularization, 1e-4)
+
+        moments.mass[:] = 0.0
+        np.testing.assert_allclose(recursions.moments.state.mass, np.array([0.5, 0.5]))
+
     def test_moments_to_parameters_normalizes_weights_and_regularizes_covariances(self) -> None:
         state = GMMMoments(
             mass=np.array([2.0, 1.0]),
@@ -37,6 +59,11 @@ class GaussianMixtureTests(unittest.TestCase):
 
         model = OnlineGaussianMixture(2, 2, learning_rate=LearningRate(0.05), rng=rng).fit(data, iterations=100)
         weights, means, covariances = model.parameters()
+
+        self.assertFalse(hasattr(model, "learning_rate"))
+        self.assertIsInstance(model.recursions.moments, GMMMomentRecursion)
+        self.assertEqual(model.recursions.moments.iteration, 100)
+        self.assertEqual(model.recursions.moments.recursion.name, "gmm_moments")
 
         fitted_mean = weights @ means
         fitted_second_moment = sum(
