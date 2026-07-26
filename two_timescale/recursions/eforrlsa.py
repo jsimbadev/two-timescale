@@ -1,4 +1,4 @@
-"""Error-forgetting robust recursive least-squares PCA recursion."""
+"""Error-forgetting robust recursive least-squares eigensystem recursion."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class EFORRLSAObservation:
 
 @dataclass
 class EFORRLSARecursion:
-    """Robust recursive least-squares PCA shape update as a recursion."""
+    """Robust recursive least-squares eigensystem update as a recursion."""
 
     state: EFORRLSAState
     iteration: int = 0

@@ -8,11 +8,11 @@ from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
 from two_timescale.gmm import OnlineGaussianMixture
 from two_timescale.ngpca import NeuralGasPCA
 from two_timescale.recursions import (
-    CVTRecursion,
+    AdaptiveGainRecursions,
     EFORRLSARecursion,
     EFORRLSAState,
-    LearningRateRecursions,
-    ResidualVarianceRecursion,
+    ScalarTrackingRecursion,
+    StateTrackingRecursion,
 )
 from two_timescale.potentials import LocalPCAGeometry, NamedPotential, as_potential
 
@@ -28,25 +28,25 @@ class RecursionSmokeTests(unittest.TestCase):
         np.testing.assert_allclose(ema.state, np.array([2.0, 3.0]))
         self.assertEqual(ema.iteration, 2)
 
-    def test_learning_rate_recursions_are_built_from_states(self) -> None:
-        rates = LearningRateRecursions.new(
-            gamma_bar=np.array([2.0]),
-            eta_bar=np.array([1.0]),
-            lambda_bar=np.array([1.0]),
-            epsilon=0.5,
+    def test_adaptive_gain_recursions_are_built_from_states(self) -> None:
+        rates = AdaptiveGainRecursions.new(
+            innovation_average=np.array([2.0]),
+            signal_average=np.array([1.0]),
+            scale_average=np.array([1.0]),
+            gain=0.5,
         )
 
-        epsilon = rates.update(
-            y=np.array([2.0]),
-            eigenvalue=np.array([3.0]),
+        gain = rates.update(
+            signal=np.array([4.0]),
+            scale=np.array([3.0]),
             step_size=0.25,
             context=None,
         )
 
-        self.assertAlmostEqual(epsilon, 1.75 / 3.25)
-        self.assertEqual(rates.gamma_bar.iteration, 1)
-        self.assertEqual(rates.eta_bar.iteration, 1)
-        self.assertEqual(rates.lambda_bar.iteration, 1)
+        self.assertAlmostEqual(gain, 1.75 / 3.25)
+        self.assertEqual(rates.innovation_average.iteration, 1)
+        self.assertEqual(rates.signal_average.iteration, 1)
+        self.assertEqual(rates.scale_average.iteration, 1)
 
     def test_named_and_custom_potentials_are_callable(self) -> None:
         geometry = LocalPCAGeometry(
@@ -86,18 +86,18 @@ class RecursionSmokeTests(unittest.TestCase):
         self.assertTrue(np.all(state.eigenvalue > 0.0))
         self.assertEqual(shape.iteration, 1)
 
-    def test_cvt_recursion_updates_a_center(self) -> None:
-        center = CVTRecursion.new(np.array([1.0, -1.0]))
+    def test_state_tracking_recursion_updates_a_vector_state(self) -> None:
+        center = StateTrackingRecursion.new(np.array([1.0, -1.0]))
 
-        updated = center.update(x_c=np.array([2.0, 4.0]), alpha=0.25)
+        updated = center.update(innovation=np.array([2.0, 4.0]), step_size=0.25)
 
         np.testing.assert_allclose(updated, np.array([1.5, 0.0]))
         self.assertEqual(center.iteration, 1)
 
-    def test_residual_variance_recursion_tracks_unrepresented_variance(self) -> None:
-        sigma = ResidualVarianceRecursion.new(2.0)
+    def test_scalar_tracking_recursion_tracks_a_target(self) -> None:
+        sigma = ScalarTrackingRecursion.new(2.0)
 
-        updated = sigma.update(residual=6.0, alpha=0.25)
+        updated = sigma.update(target=6.0, step_size=0.25)
 
         self.assertEqual(updated, 3.0)
         self.assertEqual(sigma.iteration, 1)

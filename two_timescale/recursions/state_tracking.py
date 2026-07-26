@@ -1,4 +1,4 @@
-"""Centroidal vector quantization recursions."""
+"""State-tracking stochastic approximation recursions."""
 
 from __future__ import annotations
 
@@ -10,39 +10,40 @@ from ..core import Recursion, RecursionContext, VectorField
 
 
 @dataclass
-class CVTRecursion:
-    """Centroidal vector quantization update for a local PCA center."""
+class StateTrackingRecursion:
+    """Track a vector state with update state <- state + step_size * innovation."""
 
     state: np.ndarray
+    name: str = "state_tracking"
     iteration: int = 0
 
     @classmethod
-    def new(cls, state: np.ndarray) -> "CVTRecursion":
-        return cls(state)
+    def new(cls, state: np.ndarray, name: str = "state_tracking") -> "StateTrackingRecursion":
+        return cls(state, name=name)
 
     def __post_init__(self) -> None:
         self.state = np.array(self.state, dtype=float, copy=True)
         self.recursion = Recursion(
             self.state,
-            _cvt_field(),
+            _tracking_field(self.name),
             step_size=1.0,
-            name="cvt_center",
+            name=self.name,
             iteration=self.iteration,
         )
 
     def update(
         self,
-        x_c: np.ndarray,
-        alpha: float,
+        innovation: np.ndarray,
+        step_size: float,
         context: RecursionContext | None = None,
     ) -> np.ndarray:
         if context is None:
             context = RecursionContext(iteration=self.recursion.iteration)
-        self.recursion.step_size = float(alpha)
-        self.state = self.recursion.advance(x_c, context)
+        self.recursion.step_size = float(step_size)
+        self.state = self.recursion.advance(innovation, context)
         self.iteration = self.recursion.iteration
         return self.state
 
 
-def _cvt_field() -> VectorField[np.ndarray, np.ndarray, np.ndarray]:
-    return VectorField(lambda center, x_c, ctx: x_c, name="cvt")
+def _tracking_field(name: str) -> VectorField[np.ndarray, np.ndarray, np.ndarray]:
+    return VectorField(lambda state, innovation, ctx: innovation, name=name)

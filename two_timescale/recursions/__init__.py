@@ -1,17 +1,15 @@
 """Named stochastic recursions used by two-timescale algorithms."""
 
-from .cvt import CVTRecursion
+from .adaptive_gain import AdaptiveGainRecursions
 from .eforrlsa import EFORRLSAObservation, EFORRLSARecursion, EFORRLSAState
-from .learning_rate import LearningRateRecursions
-from .local_pca import LocalPCARecursions
-from .residual_variance import ResidualVarianceRecursion
+from .scalar_tracking import ScalarTrackingRecursion
+from .state_tracking import StateTrackingRecursion
 
 __all__ = [
-    "CVTRecursion",
+    "AdaptiveGainRecursions",
     "EFORRLSAObservation",
     "EFORRLSARecursion",
     "EFORRLSAState",
-    "LearningRateRecursions",
-    "LocalPCARecursions",
-    "ResidualVarianceRecursion",
+    "ScalarTrackingRecursion",
+    "StateTrackingRecursion",
 ]
