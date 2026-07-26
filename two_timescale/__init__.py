@@ -12,17 +12,19 @@ from .core import (
 )
 from .gmm import GMMMoments, OnlineGaussianMixture
 from .ngpca import (
+    NGPCAParameters,
+    NeuralGasPCA,
+)
+from .potentials import LocalPCAGeometry, NamedPotential, PotentialFunction, PotentialName, as_potential
+from .recursions import (
     CVTRecursion,
     EFORRLSAObservation,
     EFORRLSARecursion,
     EFORRLSAState,
     LocalPCARecursions,
     LearningRateRecursions,
-    NGPCAParameters,
-    NeuralGasPCA,
     ResidualVarianceRecursion,
 )
-from .potentials import LocalPCAGeometry, NamedPotential, PotentialFunction, PotentialName, as_potential
 
 __all__ = [
     "Control",

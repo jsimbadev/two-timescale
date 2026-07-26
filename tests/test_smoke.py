@@ -6,12 +6,12 @@ import numpy as np
 
 from two_timescale import EMARecursion, LearningRate, Recursion, VectorField
 from two_timescale.gmm import OnlineGaussianMixture
-from two_timescale.ngpca import (
+from two_timescale.ngpca import NeuralGasPCA
+from two_timescale.recursions import (
     CVTRecursion,
     EFORRLSARecursion,
     EFORRLSAState,
     LearningRateRecursions,
-    NeuralGasPCA,
     ResidualVarianceRecursion,
 )
 from two_timescale.potentials import LocalPCAGeometry, NamedPotential, as_potential
