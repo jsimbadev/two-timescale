@@ -19,13 +19,13 @@ class GaussianMixtureTests(unittest.TestCase):
 
         recursions = GMMRecursions.new(
             moments,
-            learning_rate=LearningRate(0.2),
+            step_size=LearningRate(0.2),
             regularization=1e-4,
         )
 
         self.assertIsInstance(recursions.moments, GMMMomentRecursion)
         self.assertEqual(recursions.moments.name, "gmm_moments")
-        self.assertEqual(float(recursions.moments.learning_rate), 0.2)
+        self.assertEqual(float(recursions.moments.step_size), 0.2)
         self.assertEqual(recursions.moments.regularization, 1e-4)
 
         moments.mass[:] = 0.0
@@ -57,8 +57,9 @@ class GaussianMixtureTests(unittest.TestCase):
             rng.normal(loc=2.0, scale=0.4, size=(64, 2)),
         ])
 
-        model = GaussianMixtureRecursion(2, 2, learning_rate=LearningRate(0.05), rng=rng)
+        model = GaussianMixtureRecursion(2, 2, step_size=LearningRate(0.05), rng=rng)
         stream = data[[rng.integers(0, len(data)) for _ in range(100)]]
+
         model.advance(stream)
         weights, means, covariances = model.parameters()
 
@@ -99,7 +100,7 @@ class GaussianMixtureTests(unittest.TestCase):
             rng.normal(loc=1.0, scale=0.2, size=(8, 2)),
         ])
 
-        model = GaussianMixtureRecursion(2, 2, learning_rate=LearningRate(0.1), rng=rng)
+        model = GaussianMixtureRecursion(2, 2, step_size=LearningRate(0.1), rng=rng)
         model.advance(data)
 
         responsibilities = model.responsibilities(data[:3])

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
-from ..core import LearningRate, Recursion, RecursionContext, VectorField
+from ..core import Control, LearningRate, Recursion, RecursionContext, VectorField
+
+StepSize = float | Control | Callable[[RecursionContext | None], float]
 
 
 @dataclass
@@ -23,7 +26,7 @@ class GMMMomentRecursion:
     """Stochastic-EM recursion over Gaussian-mixture sufficient statistics."""
 
     state: GMMMoments
-    learning_rate: LearningRate = LearningRate(0.05)
+    step_size: StepSize = LearningRate(0.05)
     regularization: float = 1e-6
     name: str = "gmm_moments"
     iteration: int = 0
@@ -32,13 +35,13 @@ class GMMMomentRecursion:
     def new(
         cls,
         state: GMMMoments,
-        learning_rate: LearningRate = LearningRate(0.05),
+        step_size: StepSize = LearningRate(0.05),
         regularization: float = 1e-6,
         name: str = "gmm_moments",
     ) -> "GMMMomentRecursion":
         return cls(
             state=state,
-            learning_rate=learning_rate,
+            step_size=step_size,
             regularization=regularization,
             name=name,
         )
@@ -53,7 +56,7 @@ class GMMMomentRecursion:
         self.recursion = Recursion(
             self.state,
             _gmm_moment_field(self.regularization),
-            step_size=self.learning_rate,
+            step_size=self.step_size,
             name=self.name,
             iteration=self.iteration,
         )

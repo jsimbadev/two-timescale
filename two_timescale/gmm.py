@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .core import LearningRate, RecursionContext
-from .recursions import GMMMomentRecursion, GMMMoments, moments_to_parameters
+from .recursions import GMMMomentRecursion, GMMMoments, StepSize, moments_to_parameters
 
 
 @dataclass
@@ -18,13 +18,13 @@ class GMMRecursions:
     def new(
         cls,
         moments: GMMMoments,
-        learning_rate: LearningRate = LearningRate(0.05),
+        step_size: StepSize = LearningRate(0.05),
         regularization: float = 1e-6,
     ) -> "GMMRecursions":
         return cls(
             moments=GMMMomentRecursion.new(
                 moments,
-                learning_rate=learning_rate,
+                step_size=step_size,
                 regularization=regularization,
                 name="gmm_moments",
             )
@@ -38,7 +38,7 @@ class GaussianMixtureRecursion:
         self,
         n_components: int,
         n_features: int,
-        learning_rate: LearningRate = LearningRate(0.05),
+        step_size: StepSize = LearningRate(0.05),
         regularization: float = 1e-6,
         rng: np.random.Generator | None = None,
     ) -> None:
@@ -48,7 +48,7 @@ class GaussianMixtureRecursion:
         self.rng = rng or np.random.default_rng()
         self.recursions = GMMRecursions.new(
             self._initial_moments(),
-            learning_rate=learning_rate,
+            step_size=step_size,
             regularization=self.regularization,
         )
 

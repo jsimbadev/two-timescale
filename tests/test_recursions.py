@@ -11,6 +11,7 @@ from two_timescale.recursions.eforrlsa import EFORRLSAObservation, EFORRLSARecur
 from two_timescale.recursions.gmm_moments import (
     GMMMomentRecursion,
     GMMMoments,
+    StepSize,
     moments_to_parameters,
     responsibilities,
 )
@@ -26,6 +27,7 @@ class SplitRecursionModuleTests(unittest.TestCase):
         self.assertIs(recursions.EFORRLSAState, EFORRLSAState)
         self.assertIs(recursions.GMMMomentRecursion, GMMMomentRecursion)
         self.assertIs(recursions.GMMMoments, GMMMoments)
+        self.assertIs(recursions.StepSize, StepSize)
         self.assertIs(recursions.ScalarTrackingRecursion, ScalarTrackingRecursion)
         self.assertIs(recursions.StateTrackingRecursion, StateTrackingRecursion)
         self.assertIs(two_timescale.AdaptiveGainRecursions, AdaptiveGainRecursions)

@@ -25,7 +25,7 @@ def run() -> tuple[GaussianMixtureRecursion, np.ndarray]:
     model = GaussianMixtureRecursion(
         n_components=3,
         n_features=2,
-        learning_rate=LearningRate(0.03),
+        step_size=LearningRate(0.03),
         rng=rng,
     )
     stream = data[[rng.integers(0, len(data)) for _ in range(4_000)]]
