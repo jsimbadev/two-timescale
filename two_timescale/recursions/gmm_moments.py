@@ -113,17 +113,37 @@ def responsibilities(
 
 def _gmm_moment_field(regularization: float) -> VectorField[GMMMoments, np.ndarray, GMMMoments]:
     def field(state: GMMMoments, x: np.ndarray, context: RecursionContext) -> GMMMoments:
-        weights, means, covariances = moments_to_parameters(state, regularization)
-        responsibility = responsibilities(x, weights, means, covariances)
-        target_first = responsibility[:, None] * x[None, :]
-        target_second = responsibility[:, None, None] * np.outer(x, x)[None, :, :]
-        return GMMMoments(
-            mass=responsibility - state.mass,
-            first=target_first - state.first,
-            second=target_second - state.second,
-        )
+        return gmm_moment_residual(state, x, regularization)
 
     return VectorField(field, name="gmm_stochastic_em")
+
+
+def gmm_moment_target(
+    state: GMMMoments,
+    observation: np.ndarray,
+    regularization: float = 1e-6,
+) -> GMMMoments:
+    x = np.asarray(observation, dtype=float)
+    weights, means, covariances = moments_to_parameters(state, regularization)
+    responsibility = responsibilities(x, weights, means, covariances)
+    return GMMMoments(
+        mass=responsibility,
+        first=responsibility[:, None] * x[None, :],
+        second=responsibility[:, None, None] * np.outer(x, x)[None, :, :],
+    )
+
+
+def gmm_moment_residual(
+    state: GMMMoments,
+    observation: np.ndarray,
+    regularization: float = 1e-6,
+) -> GMMMoments:
+    target = gmm_moment_target(state, observation, regularization)
+    return GMMMoments(
+        mass=target.mass - state.mass,
+        first=target.first - state.first,
+        second=target.second - state.second,
+    )
 
 
 def _log_gaussian(x: np.ndarray, mean: np.ndarray, covariance: np.ndarray) -> float:

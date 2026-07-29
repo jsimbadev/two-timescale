@@ -12,10 +12,13 @@ from two_timescale.recursions.gmm_moments import (
     GMMMomentRecursion,
     GMMMoments,
     StepSize,
+    gmm_moment_residual,
+    gmm_moment_target,
     moments_to_parameters,
     responsibilities,
 )
 from two_timescale.recursions.scalar_tracking import ScalarTrackingRecursion
+from two_timescale.recursions.smoothed_statistics import SmoothedStatisticControl
 from two_timescale.recursions.state_tracking import StateTrackingRecursion
 
 
@@ -29,12 +32,14 @@ class SplitRecursionModuleTests(unittest.TestCase):
         self.assertIs(recursions.GMMMoments, GMMMoments)
         self.assertIs(recursions.StepSize, StepSize)
         self.assertIs(recursions.ScalarTrackingRecursion, ScalarTrackingRecursion)
+        self.assertIs(recursions.SmoothedStatisticControl, SmoothedStatisticControl)
         self.assertIs(recursions.StateTrackingRecursion, StateTrackingRecursion)
         self.assertIs(two_timescale.AdaptiveGainRecursions, AdaptiveGainRecursions)
         self.assertIs(two_timescale.EFORRLSARecursion, EFORRLSARecursion)
         self.assertIs(two_timescale.GMMMomentRecursion, GMMMomentRecursion)
         self.assertIs(two_timescale.GMMMoments, GMMMoments)
         self.assertIs(two_timescale.ScalarTrackingRecursion, ScalarTrackingRecursion)
+        self.assertIs(two_timescale.SmoothedStatisticControl, SmoothedStatisticControl)
         self.assertIs(two_timescale.StateTrackingRecursion, StateTrackingRecursion)
 
     def test_adaptive_gain_recursions_copy_inputs_and_update_all_averages(self) -> None:
@@ -137,6 +142,39 @@ class SplitRecursionModuleTests(unittest.TestCase):
         self.assertEqual(weights.shape, (2,))
         self.assertEqual(means.shape, (2, 2))
         self.assertEqual(covariances.shape, (2, 2, 2))
+
+    def test_gmm_moment_target_and_residual_match_vector_field_target(self) -> None:
+        state = GMMMoments(
+            mass=np.array([0.5, 0.5]),
+            first=np.array([[-0.5, 0.0], [0.5, 0.0]]),
+            second=np.tile(np.eye(2), (2, 1, 1)),
+        )
+        observation = np.array([-1.0, 0.25])
+
+        target = gmm_moment_target(state, observation, regularization=1e-4)
+        residual = gmm_moment_residual(state, observation, regularization=1e-4)
+
+        np.testing.assert_allclose(residual.mass, target.mass - state.mass)
+        np.testing.assert_allclose(residual.first, target.first - state.first)
+        np.testing.assert_allclose(residual.second, target.second - state.second)
+        np.testing.assert_allclose(target.mass.sum(), 1.0)
+
+    def test_smoothed_statistic_control_updates_average_and_clips_gain(self) -> None:
+        control = SmoothedStatisticControl.new(
+            initial_statistic=np.array([0.0, 0.0]),
+            diagnostic=lambda state, observation, context: observation - state,
+            gain_map=lambda statistic, state, observation, context: float(np.linalg.norm(statistic)),
+            initial_gain=0.5,
+            smoothing=0.5,
+            upper=0.6,
+            name="test_statistic",
+        )
+
+        gain = control.update(np.array([1.0, 1.0]), np.array([3.0, 1.0]))
+
+        np.testing.assert_allclose(control.statistic_average.state, np.array([1.0, 0.0]))
+        self.assertEqual(control.statistic_average.name, "test_statistic")
+        self.assertEqual(gain, 0.6)
 
     def test_gmm_responsibilities_are_probabilities(self) -> None:
         state = GMMMoments(

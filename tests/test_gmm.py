@@ -6,6 +6,7 @@ import numpy as np
 
 from two_timescale.core import LearningRate
 from two_timescale.gmm import GMMRecursions, GMMMoments, GaussianMixtureRecursion, moments_to_parameters
+from two_timescale.gmm_controls import AdaptiveGMMGain, SmoothedCovarianceControl, SmoothedMomentResidualControl
 from two_timescale.recursions import GMMMomentRecursion
 
 
@@ -109,6 +110,48 @@ class GaussianMixtureTests(unittest.TestCase):
         self.assertEqual(responsibilities.shape, (3, 2))
         np.testing.assert_allclose(responsibilities.sum(axis=1), np.ones(3))
         self.assertEqual(assignments.shape, (3,))
+
+    def test_gmm_recursion_accepts_responsibility_adaptive_gain_control(self) -> None:
+        gain = AdaptiveGMMGain.new(n_components=2, initial_gain=0.05)
+        model = GaussianMixtureRecursion(2, 2, step_size=gain, rng=np.random.default_rng(5))
+        observation = np.array([0.5, -0.25])
+
+        gain.update(model.recursions.moments, observation)
+        model.advance(observation)
+
+        self.assertGreaterEqual(gain.value(), 0.0)
+        self.assertLessEqual(gain.value(), gain.upper)
+        self.assertEqual(model.recursions.moments.iteration, 1)
+
+    def test_gmm_recursion_accepts_smoothed_covariance_control(self) -> None:
+        gain = SmoothedCovarianceControl.new(n_components=2, n_features=2, initial_gain=0.05)
+        model = GaussianMixtureRecursion(2, 2, step_size=gain, rng=np.random.default_rng(5))
+        observation = np.array([0.5, -0.25])
+
+        gain.update(model.recursions.moments, observation)
+        model.advance(observation)
+
+        self.assertGreaterEqual(gain.value(), 0.0)
+        self.assertLessEqual(gain.value(), gain.upper)
+        self.assertEqual(gain.statistic_average.name, "covariance_average")
+        self.assertEqual(gain.statistic_average.state.shape, (2, 2, 2))
+        self.assertEqual(model.recursions.moments.iteration, 1)
+
+    def test_gmm_recursion_accepts_smoothed_moment_residual_control(self) -> None:
+        gain = SmoothedMomentResidualControl.new(n_components=2, n_features=2, initial_gain=0.05)
+        model = GaussianMixtureRecursion(2, 2, step_size=gain, rng=np.random.default_rng(5))
+        observation = np.array([0.5, -0.25])
+
+        gain.update(model.recursions.moments, observation)
+        model.advance(observation)
+
+        self.assertGreaterEqual(gain.value(), 0.0)
+        self.assertLessEqual(gain.value(), gain.upper)
+        self.assertEqual(gain.statistic_average.name, "moment_residual_average")
+        self.assertEqual(gain.statistic_average.state.mass.shape, (2,))
+        self.assertEqual(gain.statistic_average.state.first.shape, (2, 2))
+        self.assertEqual(gain.statistic_average.state.second.shape, (2, 2, 2))
+        self.assertEqual(model.recursions.moments.iteration, 1)
 
 
 if __name__ == "__main__":

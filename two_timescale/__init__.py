@@ -11,6 +11,7 @@ from .core import (
     VectorField,
 )
 from .gmm import GMMRecursions, GMMMoments, GaussianMixtureRecursion
+from .gmm_controls import AdaptiveGMMGain, SmoothedCovarianceControl, SmoothedMomentResidualControl
 from .ngpca import (
     DEFAULT_NGPCA_INITIAL_GAIN,
     NGPCAUnitRecursions,
@@ -25,10 +26,12 @@ from .recursions import (
     EFORRLSAState,
     GMMMomentRecursion,
     ScalarTrackingRecursion,
+    SmoothedStatisticControl,
     StateTrackingRecursion,
 )
 
 __all__ = [
+    "AdaptiveGMMGain",
     "AdaptiveGainRecursions",
     "Control",
     "DEFAULT_NGPCA_INITIAL_GAIN",
@@ -53,6 +56,9 @@ __all__ = [
     "RecursionContext",
     "ScalarTrackingRecursion",
     "ScheduledLearningRate",
+    "SmoothedCovarianceControl",
+    "SmoothedMomentResidualControl",
+    "SmoothedStatisticControl",
     "StateTrackingRecursion",
     "VectorField",
     "as_potential",
