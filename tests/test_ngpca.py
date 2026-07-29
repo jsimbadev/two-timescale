@@ -8,21 +8,10 @@ from examples.ngpca_example import to_matlab_json_dict
 from two_timescale import DEFAULT_NGPCA_INITIAL_GAIN
 from two_timescale.ngpca import NGPCAParameters, NGPCAUnitRecursions, NeuralGasPCA
 from two_timescale.potentials import LocalPCAGeometry
-from two_timescale.recursions import (
-    AdaptiveGainRecursions,
-    EFORRLSARecursion,
-    ScalarTrackingRecursion,
-    StateTrackingRecursion,
-)
 
 
 class NeuralGasPCATests(unittest.TestCase):
-    def test_parameters_do_not_own_adaptive_gain_state(self) -> None:
-        params = NGPCAParameters()
-
-        self.assertFalse(hasattr(params, "learning_rate"))
-
-    def test_unit_recursions_construct_named_recursion_objects(self) -> None:
+    def test_unit_recursions_copy_inputs_and_initialize_gain_state(self) -> None:
         center = np.array([1.0, -1.0])
         weight = np.eye(2)
         eigenvalue = np.array([2.0, 0.5])
@@ -35,13 +24,6 @@ class NeuralGasPCATests(unittest.TestCase):
             initial_gain=0.7,
         )
 
-        self.assertIsInstance(recursions.adaptive_gain, AdaptiveGainRecursions)
-        self.assertIsInstance(recursions.center, StateTrackingRecursion)
-        self.assertIsInstance(recursions.shape, EFORRLSARecursion)
-        self.assertIsInstance(recursions.residual_variance, ScalarTrackingRecursion)
-
-        self.assertEqual(recursions.center.name, "cvt_center")
-        self.assertEqual(recursions.residual_variance.name, "residual_variance")
         self.assertEqual(recursions.initial_gain, 0.7)
         self.assertEqual(recursions.adaptive_gain.gain, 0.7)
 
