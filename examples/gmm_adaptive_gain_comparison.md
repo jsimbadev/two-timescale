@@ -1,7 +1,8 @@
 # Adaptive Controls for GMM Recursions
 
-The comparison script exercises one fixed-step online GMM and three adaptive
-controls. The GMM recursion itself remains the stochastic-EM moment recursion
+The comparison script exercises one fixed-step online GMM, one Robbins-Monro
+scheduled online GMM, and three adaptive controls. The GMM recursion itself
+remains the stochastic-EM moment recursion
 
 ```math
 \theta_{n+1}
@@ -34,3 +35,38 @@ step size.
 
 This keeps the model recursion task-agnostic while making the adaptive-control
 diagnostic explicit and swappable.
+
+The Robbins-Monro baseline uses
+
+```math
+\alpha_n =
+\frac{\alpha_0}{(1 + d n)^p},
+```
+
+with `--rm-initial-step`, `--rm-decay`, and `--rm-power`. If
+`--rm-initial-step` is omitted, it starts from `--fixed-step`.
+
+## Scenarios
+
+Run the separated baseline:
+
+```bash
+uv run python -m examples.gmm_adaptive_gain_comparison --scenario easy
+```
+
+Run a harder stationary mixture with overlap, correlated covariances, and
+unequal weights:
+
+```bash
+uv run python -m examples.gmm_adaptive_gain_comparison --scenario overlap
+```
+
+Run an epochwise drifting stream:
+
+```bash
+uv run python -m examples.gmm_adaptive_gain_comparison --scenario drift
+```
+
+The printed `true_nll` column is the negative log likelihood of the generating
+mixture on the validation data for that epoch. In the drift scenario the
+validation distribution changes each epoch, so this reference value moves too.
