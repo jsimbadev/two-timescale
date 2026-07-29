@@ -26,6 +26,12 @@ from two_timescale import (
 from two_timescale.recursions import GMMMoments
 
 Scenario = Literal["easy", "overlap", "drift"]
+TRUE_COLOR = "black"
+FIXED_COLOR = "tab:blue"
+RM_COLOR = "tab:orange"
+RESPONSIBILITY_COLOR = "tab:green"
+COVARIANCE_COLOR = "tab:red"
+RESIDUAL_COLOR = "tab:purple"
 
 
 @dataclass(frozen=True)
@@ -250,21 +256,44 @@ def plot(trace: list[ConvergencePoint], ax: Any | None = None) -> tuple[Any, Any
         figure = ax.figure
 
     iterations = np.array([point.iteration for point in trace])
-    ax.plot(iterations, [point.true_nll for point in trace], color="black", linestyle="-", label="true mixture")
-    ax.plot(iterations, [point.fixed_nll for point in trace], marker="o", label="fixed step")
-    ax.plot(iterations, [point.rm_nll for point in trace], marker="o", label="RM schedule")
-    ax.plot(iterations, [point.responsibility_nll for point in trace], marker="o", label="responsibility gain")
-    ax.plot(iterations, [point.covariance_nll for point in trace], marker="o", label="covariance gain")
-    ax.plot(iterations, [point.residual_nll for point in trace], marker="o", label="moment residual gain")
+    ax.plot(iterations, [point.true_nll for point in trace], color=TRUE_COLOR, linestyle="-", label="true mixture")
+    ax.plot(iterations, [point.fixed_nll for point in trace], color=FIXED_COLOR, marker="o", label="fixed step")
+    ax.plot(iterations, [point.rm_nll for point in trace], color=RM_COLOR, marker="o", label="RM schedule")
+    ax.plot(
+        iterations,
+        [point.responsibility_nll for point in trace],
+        color=RESPONSIBILITY_COLOR,
+        marker="o",
+        label="responsibility gain",
+    )
+    ax.plot(
+        iterations,
+        [point.covariance_nll for point in trace],
+        color=COVARIANCE_COLOR,
+        marker="o",
+        label="covariance gain",
+    )
+    ax.plot(
+        iterations,
+        [point.residual_nll for point in trace],
+        color=RESIDUAL_COLOR,
+        marker="o",
+        label="moment residual gain",
+    )
     ax.set_xlabel("iteration")
     ax.set_ylabel("validation negative log likelihood")
     ax.legend()
 
     gain_axis = ax.twinx()
-    gain_axis.plot(iterations, [point.rm_step for point in trace], color="tab:blue", linestyle="--")
-    gain_axis.plot(iterations, [point.responsibility_gain for point in trace], color="black", linestyle="--")
-    gain_axis.plot(iterations, [point.covariance_gain for point in trace], color="gray", linestyle=":")
-    gain_axis.plot(iterations, [point.residual_gain for point in trace], color="tab:red", linestyle="-.")
+    gain_axis.plot(iterations, [point.rm_step for point in trace], color=RM_COLOR, linestyle="--")
+    gain_axis.plot(
+        iterations,
+        [point.responsibility_gain for point in trace],
+        color=RESPONSIBILITY_COLOR,
+        linestyle="--",
+    )
+    gain_axis.plot(iterations, [point.covariance_gain for point in trace], color=COVARIANCE_COLOR, linestyle=":")
+    gain_axis.plot(iterations, [point.residual_gain for point in trace], color=RESIDUAL_COLOR, linestyle="-.")
     gain_axis.set_ylabel("control value")
     return figure, ax
 
