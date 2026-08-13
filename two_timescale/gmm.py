@@ -1,4 +1,10 @@
-"""Online Gaussian mixture model composed from named stochastic recursions."""
+"""Online Gaussian mixture model composed from named stochastic recursions.
+
+This module is a thin user-facing wrapper around
+``recursions.gmm_moments.GMMMomentRecursion``.  It initializes Gaussian-mixture
+moments, feeds observations through the online moment recursion, and exposes
+weights, means, covariances, responsibilities, and hard assignments.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +18,12 @@ from .recursions import GMMMomentRecursion, GMMMoments, StepSize, moments_to_par
 
 @dataclass
 class GMMRecursions:
+    """Owned recursions for a Gaussian mixture model.
+
+    Args:
+        moments: Sufficient-statistic recursion for the mixture.
+    """
+
     moments: GMMMomentRecursion
 
     @classmethod
@@ -21,6 +33,16 @@ class GMMRecursions:
         step_size: StepSize = LearningRate(0.05),
         regularization: float = 1e-6,
     ) -> "GMMRecursions":
+        """Construct GMM recursions from initial sufficient statistics.
+
+        Args:
+            moments: Initial sufficient statistics.
+            step_size: Stochastic-approximation step size.
+            regularization: Covariance and mass regularization constant.
+
+        Returns:
+            Container holding the configured moment recursion.
+        """
         return cls(
             moments=GMMMomentRecursion.new(
                 moments,
@@ -32,7 +54,15 @@ class GMMRecursions:
 
 
 class GaussianMixtureRecursion:
-    """Stochastic-approximation Gaussian mixture recursion."""
+    """Stochastic-approximation Gaussian mixture recursion.
+
+    Args:
+        n_components: Number of mixture components.
+        n_features: Observation dimensionality.
+        step_size: Fixed, scheduled, or adaptive step size for moment updates.
+        regularization: Covariance and mass regularization constant.
+        rng: Optional random generator used for initial means.
+    """
 
     def __init__(
         self,
@@ -53,6 +83,15 @@ class GaussianMixtureRecursion:
         )
 
     def advance(self, observations: np.ndarray) -> "GaussianMixtureRecursion":
+        """Update the model with one observation or a batch.
+
+        Args:
+            observations: Array with shape ``(n_features,)`` or
+                ``(n_observations, n_features)``.
+
+        Returns:
+            ``self`` after processing every observation.
+        """
         data = self._as_observations(observations)
         for x in data:
             self.recursions.moments.update(
@@ -63,24 +102,30 @@ class GaussianMixtureRecursion:
 
     @property
     def weights(self) -> np.ndarray:
+        """Current mixture weights."""
         return self.parameters()[0]
 
     @property
     def means(self) -> np.ndarray:
+        """Current component means."""
         return self.parameters()[1]
 
     @property
     def covariances(self) -> np.ndarray:
+        """Current component covariance matrices."""
         return self.parameters()[2]
 
     def parameters(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return current mixture weights, means, and covariances."""
         return self.recursions.moments.parameters()
 
     def responsibilities(self, observations: np.ndarray) -> np.ndarray:
+        """Return component responsibilities for one observation or a batch."""
         data = self._as_observations(observations)
         return np.vstack([self.recursions.moments.responsibility(x) for x in data])
 
     def assignments(self, observations: np.ndarray) -> np.ndarray:
+        """Return maximum-responsibility component labels."""
         return self.responsibilities(observations).argmax(axis=1)
 
     def _initial_moments(self) -> GMMMoments:

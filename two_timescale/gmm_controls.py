@@ -1,4 +1,11 @@
-"""Adaptive controls for Gaussian-mixture stochastic-EM recursions."""
+"""Adaptive step-size sources for Gaussian-mixture moment recursions.
+
+The step-size sources in this module are exploratory compositions of the same
+smoothed-statistic vocabulary used by NGPCA.  They are deliberately framed as
+diagnostics of a running GMM recursion: each object observes the current model
+and the next sample, updates an internal statistic, and exposes a scalar value
+that can be used as the model's next step size.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +21,17 @@ from .recursions.smoothed_statistics import SmoothedStatisticControl
 
 @dataclass
 class AdaptiveGMMGain:
-    """Migenda-style scalar control from component-membership disagreement."""
+    """NGPCA-inspired scalar gain from component-membership disagreement.
+
+    This adapts the NGPCA variance-matching structure to mixture weights by
+    comparing the one-sample responsibility vector with the current mixture
+    weights.
+
+    Args:
+        recursions: Adaptive-gain statistic recursions.
+        smoothing: EMA smoothing coefficient for the diagnostics.
+        upper: Upper bound for the returned scalar gain.
+    """
 
     recursions: AdaptiveGainRecursions
     smoothing: float = 0.03
@@ -28,6 +45,17 @@ class AdaptiveGMMGain:
         smoothing: float = 0.03,
         upper: float = 0.18,
     ) -> "AdaptiveGMMGain":
+        """Construct a responsibility-disagreement gain.
+
+        Args:
+            n_components: Number of mixture components.
+            initial_gain: Initial scalar gain.
+            smoothing: EMA smoothing coefficient.
+            upper: Upper bound for the returned gain.
+
+        Returns:
+            Configured adaptive GMM gain.
+        """
         mixture_mass = np.full(n_components, 1.0 / n_components)
         return cls(
             recursions=AdaptiveGainRecursions.new(
@@ -41,6 +69,7 @@ class AdaptiveGMMGain:
         )
 
     def value(self, context: RecursionContext | None = None) -> float:
+        """Return the current clipped gain."""
         return min(max(float(self.recursions.gain), 0.0), self.upper)
 
     def update(
@@ -49,6 +78,16 @@ class AdaptiveGMMGain:
         observation: np.ndarray,
         context: RecursionContext | None = None,
     ) -> float:
+        """Update the gain from a model state and observation.
+
+        Args:
+            moments: Running GMM moment recursion.
+            observation: Observation about to update the GMM.
+            context: Optional recursion context.
+
+        Returns:
+            Clipped scalar gain for the outer GMM recursion.
+        """
         weights, _, _ = moments.parameters()
         responsibility = moments.responsibility(observation)
         self.recursions.update(
@@ -61,7 +100,13 @@ class AdaptiveGMMGain:
 
 
 class SmoothedCovarianceControl(SmoothedStatisticControl[GMMMomentRecursion, np.ndarray, np.ndarray]):
-    """Scalar control from a smoothed responsibility-weighted covariance mismatch."""
+    """Scalar gain from a smoothed covariance mismatch diagnostic.
+
+    The diagnostic tracks componentwise sample covariance matrices around the
+    current means.  The gain map compares the smoothed diagnostic with the
+    current covariance estimates and weights the relative mismatch by the
+    observation responsibilities.
+    """
 
     @classmethod
     def new(
@@ -72,6 +117,7 @@ class SmoothedCovarianceControl(SmoothedStatisticControl[GMMMomentRecursion, np.
         smoothing: float = 0.03,
         upper: float = 0.18,
     ) -> "SmoothedCovarianceControl":
+        """Construct a covariance-mismatch gain."""
         initial_covariance = np.tile(np.eye(n_features), (n_components, 1, 1))
         return cls(
             statistic_average=EMARecursion(initial_covariance, name="covariance_average"),
@@ -85,7 +131,12 @@ class SmoothedCovarianceControl(SmoothedStatisticControl[GMMMomentRecursion, np.
 
 
 class SmoothedMomentResidualControl(SmoothedStatisticControl[GMMMomentRecursion, np.ndarray, GMMMoments]):
-    """Scalar control from the smoothed full stochastic-EM moment residual."""
+    """Scalar gain from the smoothed full GMM moment residual.
+
+    The diagnostic is the same residual that drives the GMM moment recursion.
+    Its norm is scaled by the current moment norm to produce a dimensionless
+    gain.
+    """
 
     @classmethod
     def new(
@@ -96,6 +147,7 @@ class SmoothedMomentResidualControl(SmoothedStatisticControl[GMMMomentRecursion,
         smoothing: float = 0.03,
         upper: float = 0.18,
     ) -> "SmoothedMomentResidualControl":
+        """Construct a moment-residual gain."""
         initial_residual = GMMMoments(
             mass=np.zeros(n_components),
             first=np.zeros((n_components, n_features)),

@@ -1,4 +1,28 @@
-"""Gaussian-mixture moment recursions for stochastic EM."""
+r"""Gaussian-mixture moment recursions as stochastic approximation.
+
+The recursion state stores sufficient statistics rather than natural Gaussian
+parameters.  For component responsibilities ``r_k(x_t)``, one stochastic target
+is
+
+.. math::
+
+    S_t^k = \left(r_k,\; r_k x_t,\; r_k x_t x_t^\top\right),
+
+and the online recursion updates ``state <- state + a_t * (S_t - state)``.
+The parameters exposed to callers are recovered as
+
+.. math::
+
+    \pi_k = s_k / \sum_j s_j,\qquad
+    \mu_k = m_k / s_k,\qquad
+    \Sigma_k = Q_k / s_k - \mu_k\mu_k^\top.
+
+References:
+    Kushner2003_RUQZUAC7:
+        Kushner, H. J., & Yin, G. (2003). *Stochastic Approximation and
+        Recursive Algorithms and Applications*. Springer New York. General
+        stochastic-approximation background; Zotero item key ``RUQZUAC7``.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +38,13 @@ StepSize = float | Control | Callable[[RecursionContext | None], float]
 
 @dataclass
 class GMMMoments:
-    """Sufficient statistics for an online Gaussian mixture."""
+    """Sufficient statistics for an online Gaussian mixture.
+
+    Args:
+        mass: Per-component zeroth moments ``s_k``.
+        first: Per-component first moments ``m_k = s_k * mu_k``.
+        second: Per-component second raw moments ``Q_k = s_k * E[x x^T]``.
+    """
 
     mass: np.ndarray
     first: np.ndarray
@@ -23,7 +53,17 @@ class GMMMoments:
 
 @dataclass
 class GMMMomentRecursion:
-    """Stochastic-EM recursion over Gaussian-mixture sufficient statistics."""
+    """Online moment recursion over Gaussian-mixture sufficient statistics.
+
+    Args:
+        state: Initial sufficient-statistic state.
+        step_size: Fixed, scheduled, or adaptive stochastic-approximation step
+            size.
+        regularization: Positive diagonal covariance regularizer and minimum
+            component mass used when converting moments to parameters.
+        name: Human-readable recursion name.
+        iteration: Initial iteration counter.
+    """
 
     state: GMMMoments
     step_size: StepSize = LearningRate(0.05)
@@ -39,6 +79,17 @@ class GMMMomentRecursion:
         regularization: float = 1e-6,
         name: str = "gmm_moments",
     ) -> "GMMMomentRecursion":
+        """Construct a GMM moment recursion.
+
+        Args:
+            state: Initial sufficient statistics.
+            step_size: Recursion step size.
+            regularization: Covariance and mass regularization constant.
+            name: Human-readable recursion name.
+
+        Returns:
+            Configured GMM moment recursion.
+        """
         return cls(
             state=state,
             step_size=step_size,
@@ -66,6 +117,15 @@ class GMMMomentRecursion:
         observation: np.ndarray,
         context: RecursionContext | None = None,
     ) -> GMMMoments:
+        """Advance the sufficient statistics by one observation.
+
+        Args:
+            observation: Observation vector.
+            context: Optional runtime context.
+
+        Returns:
+            Updated sufficient-statistic state.
+        """
         if context is None:
             context = RecursionContext(iteration=self.recursion.iteration)
         self.state = self.recursion.advance(np.asarray(observation, dtype=float), context)
@@ -73,9 +133,11 @@ class GMMMomentRecursion:
         return self.state
 
     def parameters(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return mixture weights, means, and covariance matrices."""
         return moments_to_parameters(self.state, self.regularization)
 
     def responsibility(self, observation: np.ndarray) -> np.ndarray:
+        """Return posterior component probabilities for one observation."""
         weights, means, covariances = self.parameters()
         return responsibilities(np.asarray(observation, dtype=float), weights, means, covariances)
 
@@ -84,6 +146,15 @@ def moments_to_parameters(
     state: GMMMoments,
     regularization: float = 1e-6,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Convert sufficient statistics to Gaussian-mixture parameters.
+
+    Args:
+        state: Moment state to convert.
+        regularization: Minimum mass and diagonal covariance regularizer.
+
+    Returns:
+        Tuple ``(weights, means, covariances)``.
+    """
     mass = np.maximum(state.mass, regularization)
     weights = mass / mass.sum()
     means = state.first / mass[:, None]
@@ -100,6 +171,17 @@ def responsibilities(
     means: np.ndarray,
     covariances: np.ndarray,
 ) -> np.ndarray:
+    """Compute Gaussian-mixture responsibilities for one observation.
+
+    Args:
+        x: Observation vector.
+        weights: Mixture weights.
+        means: Component mean matrix.
+        covariances: Component covariance tensor.
+
+    Returns:
+        Normalized responsibility vector.
+    """
     logp = np.log(np.maximum(weights, np.finfo(float).tiny))
     for k in range(len(weights)):
         logp[k] += _log_gaussian(x, means[k], covariances[k])
@@ -123,6 +205,16 @@ def gmm_moment_target(
     observation: np.ndarray,
     regularization: float = 1e-6,
 ) -> GMMMoments:
+    """Return the one-sample responsibility-weighted target moments.
+
+    Args:
+        state: Current moment state used to compute responsibilities.
+        observation: Observation vector.
+        regularization: Covariance and mass regularization constant.
+
+    Returns:
+        Moment target implied by the current responsibility vector.
+    """
     x = np.asarray(observation, dtype=float)
     weights, means, covariances = moments_to_parameters(state, regularization)
     responsibility = responsibilities(x, weights, means, covariances)
@@ -138,6 +230,7 @@ def gmm_moment_residual(
     observation: np.ndarray,
     regularization: float = 1e-6,
 ) -> GMMMoments:
+    """Return the residual between target and current GMM moments."""
     target = gmm_moment_target(state, observation, regularization)
     return GMMMoments(
         mass=target.mass - state.mass,

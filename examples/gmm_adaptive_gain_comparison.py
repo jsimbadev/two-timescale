@@ -1,4 +1,10 @@
-"""Compare fixed-step and adaptive-control Gaussian-mixture recursions."""
+"""Compare fixed-step and adaptive-step Gaussian-mixture recursions.
+
+The script is a diagnostic harness for the package's composability claims.  It
+keeps the GMM recursion fixed and varies only the step-size source: a constant
+learning rate, a polynomial-decay deterministic schedule, and several
+smoothed-statistic adaptive gains.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +42,32 @@ RESIDUAL_COLOR = "tab:purple"
 
 @dataclass(frozen=True)
 class ConvergencePoint:
+    """One checkpoint in the GMM comparison trace.
+
+    Attributes:
+        epoch_index: Epoch number of the checkpoint.
+        iteration: GMM recursion iteration at the checkpoint.
+        true_nll: Validation negative log likelihood under the generating
+            mixture.
+        fixed_nll: Validation score for the fixed-step recursion.
+        rm_nll: Validation score for the deterministic schedule recursion.
+        rm_step: Current deterministic schedule value.
+        responsibility_nll: Validation score for responsibility-gain control.
+        responsibility_gain: Current responsibility-gain value.
+        covariance_nll: Validation score for covariance-mismatch control.
+        covariance_gain: Current covariance-mismatch gain.
+        residual_nll: Validation score for moment-residual control.
+        residual_gain: Current moment-residual gain.
+        fixed_moment_difference: Relative moment displacement during the epoch.
+        rm_moment_difference: Relative moment displacement during the epoch.
+        responsibility_moment_difference: Relative moment displacement during
+            the epoch.
+        covariance_moment_difference: Relative moment displacement during the
+            epoch.
+        residual_moment_difference: Relative moment displacement during the
+            epoch.
+    """
+
     epoch_index: int
     iteration: int
     true_nll: float
@@ -57,12 +89,21 @@ class ConvergencePoint:
 
 @dataclass(frozen=True)
 class MixtureSpec:
+    """Parameters of a synthetic Gaussian mixture.
+
+    Args:
+        weights: Mixture weights.
+        means: Component means.
+        covariances: Component covariance matrices.
+    """
+
     weights: np.ndarray
     means: np.ndarray
     covariances: np.ndarray
 
 
 def make_mixture(seed: int = 12, n_per_component: int = 220) -> np.ndarray:
+    """Generate the separated synthetic comparison mixture."""
     rng = np.random.default_rng(seed)
     left = rng.normal(loc=(-2.4, -0.2), scale=(0.45, 0.7), size=(n_per_component, 2))
     right = rng.normal(loc=(2.1, 0.8), scale=(0.65, 0.35), size=(n_per_component, 2))
@@ -71,10 +112,12 @@ def make_mixture(seed: int = 12, n_per_component: int = 220) -> np.ndarray:
 
 
 def make_overlap_mixture(seed: int = 12, n_samples: int = 660) -> np.ndarray:
+    """Generate the overlapping and imbalanced comparison mixture."""
     return _sample_mixture(_overlap_spec(), n_samples, np.random.default_rng(seed))
 
 
 def make_drift_mixture(seed: int = 12, epoch_index: int = 0, n_samples: int = 528) -> np.ndarray:
+    """Generate one epoch of the drifting comparison mixture."""
     return _sample_mixture(_drift_spec(epoch_index), n_samples, np.random.default_rng(seed))
 
 
@@ -96,6 +139,22 @@ def run_comparison(
     GaussianMixtureRecursion,
     np.ndarray,
 ]:
+    """Run the fixed-step, scheduled, and adaptive-gain GMM comparison.
+
+    Args:
+        epochs: Number of training epochs.
+        fixed_step: Constant step size for the fixed baseline.
+        rm_initial_step: Optional initial value for the deterministic schedule.
+        rm_decay: Decay multiplier for the deterministic schedule.
+        rm_power: Polynomial power for the deterministic schedule.
+        initial_gain: Initial value for adaptive gains.
+        seed: Random seed controlling data and model initialization.
+        scenario: Synthetic data scenario.
+
+    Returns:
+        Trace, fitted models for each step-size source, and final validation
+        data.
+    """
     rng = np.random.default_rng(seed)
     train, validation = _initial_data(scenario, seed, rng)
 
@@ -219,6 +278,7 @@ def run_comparison(
 
 
 def negative_log_likelihood(model: GaussianMixtureRecursion, data: np.ndarray) -> float:
+    """Compute mean negative log likelihood under a fitted GMM recursion."""
     weights, means, covariances = model.parameters()
     log_weights = np.log(np.maximum(weights, np.finfo(float).tiny))
     log_likelihood = 0.0
@@ -234,6 +294,7 @@ def negative_log_likelihood(model: GaussianMixtureRecursion, data: np.ndarray) -
 
 
 def true_negative_log_likelihood(scenario: Scenario, data: np.ndarray, epoch_index: int = 0) -> float:
+    """Compute mean negative log likelihood under the generating mixture."""
     spec = _scenario_spec(scenario, epoch_index)
     log_weights = np.log(np.maximum(spec.weights, np.finfo(float).tiny))
     log_likelihood = 0.0
@@ -249,6 +310,7 @@ def true_negative_log_likelihood(scenario: Scenario, data: np.ndarray, epoch_ind
 
 
 def plot(trace: list[ConvergencePoint], ax: Any | None = None) -> tuple[Any, Any]:
+    """Plot validation scores and step-size values over the trace."""
     plt = _load_pyplot()
     if ax is None:
         figure, ax = plt.subplots()
@@ -299,6 +361,7 @@ def plot(trace: list[ConvergencePoint], ax: Any | None = None) -> tuple[Any, Any
 
 
 def plot_differences(trace: list[ConvergencePoint], ax: Any | None = None) -> tuple[Any, Any]:
+    """Plot relative moment displacement for each comparison model."""
     plt = _load_pyplot()
     if ax is None:
         figure, ax = plt.subplots()
@@ -322,6 +385,7 @@ def plot_differences(trace: list[ConvergencePoint], ax: Any | None = None) -> tu
 
 
 def print_trace(trace: list[ConvergencePoint]) -> None:
+    """Print the comparison trace as a fixed-width table."""
     print("epoch iteration true_nll fixed_nll rm_nll rm_step resp_nll resp_gain cov_nll cov_gain resid_nll resid_gain")
     for point in trace:
         print(

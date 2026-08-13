@@ -1,12 +1,22 @@
-"""Algebraic primitives for stochastic recursions.
+r"""Algebraic primitives for stochastic recursions.
 
-The central object is a recursion
+This module gives the rest of the package a small common language for online
+updates.  The central object is the stochastic-approximation recursion
 
-    z[n + 1] = z[n] + a[n] * F(z[n], observation[n]).
+.. math::
 
-`F` is a :class:`VectorField`; `a` is a typed control such as a
-:class:`LearningRate`. Vector fields can be scaled by parameters or by other
-recursions, which is the main hook for adaptive controls.
+    z_{t+1} = z_t + a_t F(z_t, x_t),
+
+where ``z_t`` is the recursion state, ``x_t`` is the current observation,
+``F`` is a :class:`VectorField`, and ``a_t`` is a scalar step size.  The same
+object also represents auxiliary recursions, so an adaptive step size can be
+the state of another recursion rather than a fixed float.
+
+References:
+    Kushner2003_RUQZUAC7:
+        Kushner, H. J., & Yin, G. (2003). *Stochastic Approximation and
+        Recursive Algorithms and Applications*. Springer New York. Zotero item
+        key ``RUQZUAC7``.
 """
 
 from __future__ import annotations
@@ -22,20 +32,37 @@ Delta = TypeVar("Delta")
 
 
 class Control(Protocol):
-    """A scalar value used to scale a vector field."""
+    """Protocol for scalar step-size sources that can scale a vector field.
+
+    The protocol is intentionally narrow: it only has to expose the scalar value
+    used by a recursion at the supplied context.  Implementations may be fixed
+    parameters, deterministic schedules, or stateful recursions.
+    """
 
     def value(self, context: "RecursionContext | None" = None) -> float:
         ...
 
 
 class SupportsArray(Protocol):
+    """Protocol for objects NumPy can coerce with ``np.asarray``."""
+
     def __array__(self) -> np.ndarray:
         ...
 
 
 @dataclass(frozen=True)
 class RecursionContext:
-    """Runtime context available to vector fields and controls."""
+    """Runtime context supplied during one recursion update.
+
+    Attributes:
+        iteration: Zero-based iteration index of the recursion invoking the
+            vector field.
+        rng: Optional random number generator shared with fields or step-size
+            sources that need reproducible stochastic choices.
+        metadata: Optional caller-defined data for algorithms that need to pass
+            rank, component, or diagnostic information through the recursion
+            stack.
+    """
 
     iteration: int = 0
     rng: np.random.Generator | None = None
@@ -44,7 +71,17 @@ class RecursionContext:
 
 @dataclass(frozen=True)
 class FreeParameter:
-    """A chosen scalar parameter with optional validation bounds."""
+    """Chosen scalar parameter with optional validation bounds.
+
+    Args:
+        value_: Numeric value of the parameter.
+        name: Name used in validation errors and diagnostic displays.
+        lower: Inclusive lower bound.  ``None`` disables the lower-bound check.
+        upper: Inclusive upper bound.  ``None`` disables the upper-bound check.
+
+    Raises:
+        ValueError: If ``value_`` falls outside the supplied bounds.
+    """
 
     value_: float
     name: str = "parameter"
@@ -68,7 +105,7 @@ class FreeParameter:
 
 @dataclass(frozen=True)
 class LearningRate(FreeParameter):
-    """A typed free parameter for stochastic approximation step sizes."""
+    """Free parameter specialized to a stochastic-approximation step size."""
 
     name: str = "learning_rate"
     lower: float | None = 0.0
@@ -77,7 +114,21 @@ class LearningRate(FreeParameter):
 
 @dataclass(frozen=True)
 class ScheduledLearningRate:
-    """Deterministic schedule a_n = initial / (1 + decay * n)^power."""
+    r"""Deterministic polynomial-decay learning-rate schedule.
+
+    The schedule evaluates
+
+    .. math::
+
+        a_t = a_0 (1 + d t)^{-p},
+
+    where ``a_0`` is ``initial``, ``d`` is ``decay``, and ``p`` is ``power``.
+
+    Args:
+        initial: Initial learning rate.
+        decay: Non-negative decay multiplier applied to the iteration index.
+        power: Polynomial decay exponent.
+    """
 
     initial: LearningRate
     decay: float = 0.0
@@ -94,6 +145,7 @@ def _ema_field() -> "VectorField[Any, Any, Any]":
 
 def _as_scalar(control: float | Control | Callable[[RecursionContext | None], float],
                context: RecursionContext | None) -> float:
+    """Evaluate a scalar step-size source."""
     if isinstance(control, Recursion):
         return float(np.asarray(control.state))
     if hasattr(control, "value"):
@@ -104,7 +156,17 @@ def _as_scalar(control: float | Control | Callable[[RecursionContext | None], fl
 
 
 def scale_delta(delta: Any, scalar: float) -> Any:
-    """Scale numeric, array, dataclass, tuple/list, or dict deltas."""
+    """Scale a structured recursion delta by a scalar.
+
+    Args:
+        delta: Numeric object, dataclass, tuple, list, or dictionary whose
+            leaves support scalar multiplication.
+        scalar: Scalar multiplier.
+
+    Returns:
+        Object with the same structure as ``delta`` and each leaf multiplied by
+        ``scalar``.
+    """
 
     if is_dataclass(delta):
         return replace(delta, **{f.name: scale_delta(getattr(delta, f.name), scalar) for f in fields(delta)})
@@ -118,7 +180,15 @@ def scale_delta(delta: Any, scalar: float) -> Any:
 
 
 def add_delta(state: Any, delta: Any) -> Any:
-    """Add a delta to a state with the same structure."""
+    """Add a structured delta to a recursion state.
+
+    Args:
+        state: Current recursion state.
+        delta: Increment with the same structure as ``state``.
+
+    Returns:
+        Updated state with ``delta`` added leafwise.
+    """
 
     if is_dataclass(state):
         return replace(state, **{f.name: add_delta(getattr(state, f.name), getattr(delta, f.name)) for f in fields(state)})
@@ -133,7 +203,17 @@ def add_delta(state: Any, delta: Any) -> Any:
 
 @dataclass(frozen=True)
 class VectorField(Generic[State, Observation, Delta]):
-    """Callable vector field with scalar multiplication."""
+    """Callable vector field with algebraic composition.
+
+    A vector field is the ``F`` in ``z <- z + a F(z, x)``.  It can be added to
+    another vector field or scaled by a float, callable schedule, or
+    :class:`Control`.  Scaling is evaluated at call time, which lets a field be
+    premultiplied by a stateful recursion.
+
+    Args:
+        fn: Callable implementing ``fn(state, observation, context)``.
+        name: Human-readable field name used in composed field names.
+    """
 
     fn: Callable[[State, Observation, RecursionContext], Delta]
     name: str = "vector_field"
@@ -163,7 +243,22 @@ class VectorField(Generic[State, Observation, Delta]):
 
 @dataclass
 class Recursion(Generic[State, Observation]):
-    """Stateful Euler recursion driven by a vector field and scalar control."""
+    r"""Stateful Euler recursion driven by a vector field and step size.
+
+    The update is
+
+    .. math::
+
+        z_{t+1} = z_t + a_t F(z_t, x_t).
+
+    Args:
+        state: Initial recursion state.
+        field: Vector field evaluated at each update.
+        step_size: Fixed scalar, callable schedule, :class:`Control`, or scalar
+            recursion state used as ``a_t``.
+        name: Human-readable recursion name.
+        iteration: Initial iteration counter.
+    """
 
     state: State
     field: VectorField[State, Observation, Any]
@@ -172,6 +267,7 @@ class Recursion(Generic[State, Observation]):
     iteration: int = 0
 
     def step_value(self, context: RecursionContext | None = None) -> float:
+        """Evaluate the scalar step size for one update context."""
         return _as_scalar(self.step_size, context)
 
     def advance(
@@ -179,6 +275,16 @@ class Recursion(Generic[State, Observation]):
         observation: Observation,
         context: RecursionContext | None = None,
     ) -> State:
+        """Advance the recursion by one observation.
+
+        Args:
+            observation: Current observation or target consumed by ``field``.
+            context: Optional runtime context.  If omitted, one is created from
+                this recursion's current iteration.
+
+        Returns:
+            Updated recursion state.
+        """
         if context is None:
             context = RecursionContext(iteration=self.iteration)
         delta = self.field(self.state, observation, context)
@@ -187,7 +293,15 @@ class Recursion(Generic[State, Observation]):
         return self.state
 
     def control(self, selector: Callable[[State], float] | None = None) -> Callable[[RecursionContext | None], float]:
-        """Expose the current recursion state as a scalar control."""
+        """Expose the current recursion state as a scalar step-size function.
+
+        Args:
+            selector: Optional function selecting a scalar from a structured
+                recursion state.
+
+        Returns:
+            Callable compatible with :class:`Recursion` step sizes.
+        """
 
         def current_value(context: RecursionContext | None = None) -> float:
             selected = self.state if selector is None else selector(self.state)
@@ -198,11 +312,23 @@ class Recursion(Generic[State, Observation]):
 
 @dataclass
 class EMARecursion(Generic[State]):
-    """Exponential moving average expressed through the recursion algebra.
+    r"""Exponential moving average expressed through the recursion algebra.
 
-    The update is ``state <- state + step_size * (target - state)``.  The
-    optional per-call ``step_size`` lets algorithms use rank-dependent smoothing
-    while keeping the moving average as a persistent recursion object.
+    The update is
+
+    .. math::
+
+        \bar{s}_{t+1} = \bar{s}_t + a_t (s_t - \bar{s}_t).
+
+    The optional per-call ``step_size`` lets algorithms use observation- or
+    rank-dependent smoothing while keeping the moving average as a persistent
+    recursion object.
+
+    Args:
+        state: Initial average.
+        step_size: Default smoothing coefficient.
+        name: Human-readable recursion name.
+        iteration: Initial iteration counter.
     """
 
     state: State
@@ -225,6 +351,16 @@ class EMARecursion(Generic[State]):
         step_size: float | Control | Callable[[RecursionContext | None], float] | None = None,
         context: RecursionContext | None = None,
     ) -> State:
+        """Update the moving average toward a target.
+
+        Args:
+            target: New statistic or target state.
+            step_size: Optional smoothing coefficient for this update only.
+            context: Optional runtime context.
+
+        Returns:
+            Updated average state.
+        """
         if step_size is not None:
             self.recursion.step_size = step_size
         if context is None:

@@ -1,4 +1,25 @@
-"""Potential functions for local PCA unit competition."""
+r"""Potential functions for local PCA unit competition.
+
+Each potential maps the geometry of one local PCA unit and one observation to a
+scalar ranking score.  The shared basis term is the geometric Mahalanobis
+distance with reconstruction residual,
+
+.. math::
+
+    d_{MG}(\xi)
+      = y^\top \Lambda^{-1}y
+        + \check{\lambda}^{-1}\xi^\top(I - WW^\top)\xi,
+
+where the second term is present only when the retained PCA dimensionality is
+smaller than the observation dimensionality.
+
+References:
+    Migenda02/2_RGHQJ3PP:
+        Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
+        Principal Component Analysis improves the clustering of
+        high-dimensional data. *Pattern Recognition*, 146, 110030. Equations
+        (23), (24), (32), (33), (37), and (38). Zotero item key ``RGHQJ3PP``.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +33,17 @@ PotentialName = Literal["AR", "N", "H", "AV", "VRV", "VRR"]
 
 @dataclass(frozen=True)
 class LocalPCAGeometry:
-    """Geometry needed to rank one local PCA unit for one observation."""
+    """Geometry needed to rank one local PCA unit for one observation.
+
+    Args:
+        x_c: Centered observation ``xi = x - c``.
+        y: Projected observation ``W.T @ xi``.
+        eigenvalue: Principal eigenvalues in the retained PCA subspace.
+        sigma_sqr: Residual variance in unrepresented directions.
+        activity: Unit activity used by adaptive potential functions.
+        pca_dimensionality: Retained local PCA dimensionality ``m``.
+        data_dimensionality: Observation dimensionality ``n``.
+    """
 
     x_c: np.ndarray
     y: np.ndarray
@@ -34,12 +65,36 @@ class PotentialFunction(Protocol):
 
 @dataclass(frozen=True)
 class NamedPotential:
-    """Potential functions evaluated in Migenda, Moeller, and Schenck."""
+    r"""Named NGPCA potential function.
+
+    The package uses short names for the potential families described in the
+    paper:
+
+    ``N``
+        Unregularized geometric Mahalanobis basis ``d_MG``.
+    ``H``
+        Volume-normalized potential ``d_H``.
+    ``AV`` and ``AR``
+        Activity-controlled absolute volume and absolute radius variants.
+    ``VRV`` and ``VRR``
+        Activity-controlled relative volume and relative radius variants.
+
+    The activity support follows the radius-control mechanism
+
+    .. math::
+
+        r(a) = r_{max}^{1 - min(a, 1)}.
+
+    Args:
+        name: Potential name.
+        rmax: Maximum support factor for low-activity units.
+    """
 
     name: PotentialName = "AR"
     rmax: float = 200.0
 
     def __call__(self, geometry: LocalPCAGeometry) -> float:
+        """Evaluate the named potential for one unit-observation geometry."""
         basis, lambda_rest, eigenvalue = _mahalanobis_basis(geometry)
         adaptive = self.rmax ** (1.0 - min(geometry.activity, 1.0))
 
@@ -80,6 +135,16 @@ PotentialSpec = PotentialName | PotentialFunction | Callable[[LocalPCAGeometry],
 
 
 def as_potential(spec: PotentialSpec, rmax: float = 200.0) -> PotentialFunction:
+    """Normalize a potential specification to a callable potential object.
+
+    Args:
+        spec: Named potential, object with a ``name`` attribute and
+            ``__call__``, or arbitrary callable.
+        rmax: Maximum support factor used when ``spec`` is a named potential.
+
+    Returns:
+        Callable potential object.
+    """
     if isinstance(spec, str):
         return NamedPotential(spec, rmax=rmax)
     if hasattr(spec, "name"):

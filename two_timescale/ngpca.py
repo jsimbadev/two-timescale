@@ -1,4 +1,20 @@
-"""Neural Gas PCA recursions after Migenda, Moeller, and Schenck."""
+r"""Neural Gas PCA recursions after Migenda, Moeller, and Schenck.
+
+The implementation follows the online local-PCA structure described by
+Migenda, Moeller, and Schenck: each local unit owns a center ``c_j``, an
+orthonormal PCA basis ``W_j``, principal eigenvalues ``lambda_j``, a residual
+variance estimate, and an adaptive local learning rate.  For an observation
+``x_t``, the model ranks units by a potential function, updates the adaptive
+gain of each sufficiently ranked unit, and then advances the center and local
+PCA shape recursions.
+
+References:
+    Migenda02/2_RGHQJ3PP:
+        Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
+        Principal Component Analysis improves the clustering of
+        high-dimensional data. *Pattern Recognition*, 146, 110030. Zotero item
+        key ``RGHQJ3PP``.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +39,20 @@ DEFAULT_NGPCA_INITIAL_GAIN = 0.99
 
 @dataclass(frozen=True)
 class NGPCAParameters:
-    """Free parameters matching the MATLAB NGPCA defaults."""
+    """Free parameters for the implemented NGPCA update.
+
+    Args:
+        potential_function: Named or callable unit-ranking potential.
+        softhard: Hard/soft clustering threshold.  Units with neighborhood
+            weight below this value are not adapted.
+        activity: Initial activity assigned to each local PCA unit.
+        rho_init: Initial neighborhood range ``rho_max`` used by this package.
+        rho_final: Minimum neighborhood range ``rho_min`` used by this package.
+        mu: Base low-pass coefficient ``omega`` for adaptive gain and activity
+            updates.
+        rmax: Maximum radius/activity support in the adaptive potential.
+        initial_eigenvalue: Initial principal and residual variance estimate.
+    """
 
     potential_function: PotentialSpec = "AR"
     softhard: FreeParameter = FreeParameter(0.0, name="softhard", lower=0.0, upper=1.0)
@@ -37,6 +66,21 @@ class NGPCAParameters:
 
 @dataclass
 class LocalPCAUnit:
+    """Mutable local PCA unit state used by :class:`NeuralGasPCA`.
+
+    Args:
+        m: Local PCA dimensionality.
+        center: Unit center ``c_j``.
+        weight: Orthonormal basis matrix ``W_j`` with one eigenvector per
+            column.
+        eigenvalue: Principal eigenvalue vector ``lambda_j``.
+        sigma_sqr: Residual variance in unrepresented directions.
+        activity: Activity statistic used by adaptive potential functions.
+        x_c: Most recent centered observation ``x - c_j``.
+        y: Most recent projection ``W_j.T @ (x - c_j)``.
+        alpha: Effective learning rate used on the most recent unit update.
+    """
+
     m: int
     center: np.ndarray
     weight: np.ndarray
@@ -50,6 +94,18 @@ class LocalPCAUnit:
 
 @dataclass
 class NGPCAUnitRecursions:
+    """Recursions owned by one local PCA unit.
+
+    Args:
+        adaptive_gain: Smoothed variance-matching recursions for local learning
+            rate estimation.
+        center: Stochastic approximation recursion for the center.
+        shape: Recursive least-squares PCA shape recursion.
+        residual_variance: EMA recursion for unexplained variance.
+        initial_gain: Initial adaptive gain used for serialization and model
+            diagnostics.
+    """
+
     adaptive_gain: AdaptiveGainRecursions
     center: StateTrackingRecursion
     shape: EFORRLSARecursion
@@ -65,6 +121,18 @@ class NGPCAUnitRecursions:
         residual_variance: float,
         initial_gain: float = DEFAULT_NGPCA_INITIAL_GAIN,
     ) -> "NGPCAUnitRecursions":
+        """Construct the recursions for one initialized local PCA unit.
+
+        Args:
+            center: Initial center vector.
+            weight: Initial PCA basis matrix.
+            eigenvalue: Initial principal eigenvalue vector.
+            residual_variance: Initial residual variance.
+            initial_gain: Initial local adaptive gain.
+
+        Returns:
+            Recursion bundle with copied numeric state.
+        """
         gain = float(initial_gain)
         return cls(
             adaptive_gain=AdaptiveGainRecursions.new(
@@ -94,11 +162,39 @@ def _orthonormal_columns_svd(matrix: np.ndarray) -> np.ndarray:
 
 
 class NeuralGasPCA:
-    """Online neural-gas clustering with local PCA units.
+    r"""Online neural-gas clustering with local PCA units.
 
-    The adaptive learning rate follows the paper's variance-matching algorithm:
-    gamma_bar, eta_bar, and lambda_bar are each tracked by their own EMA
-    recursion, then combined into a per-unit learning rate.
+    For each observation, the model computes
+
+    .. math::
+
+        \xi_j = x - c_j,\qquad y_j = W_j^\top \xi_j,
+
+    ranks units by the configured potential, and applies the neighborhood
+    weight
+
+    .. math::
+
+        h_\rho(R_j) = \exp((1 - R_j) / \rho).
+
+    The adaptive local gain is estimated from the NGPCA variance-matching
+    statistics and then multiplied by ``h`` before updating the center, shape,
+    and residual variance.  In hard-clustering mode, ``softhard`` stops the
+    ranked update loop once the neighborhood weight is too small.
+
+    Args:
+        number_units: Number of local PCA units.
+        pca_dimensionality: Number of principal directions per unit.
+        params: Optional NGPCA free parameters.
+        rng: Optional NumPy-compatible random generator.
+        weight_initialization: Initial basis distribution, either ``"normal"``
+            followed by QR orthonormalization or ``"uniform"`` followed by SVD
+            orthonormalization.
+
+    References:
+        Migenda02/2_RGHQJ3PP:
+            Equations (16)--(21) describe neural-gas neighborhood updates and
+            adaptive local learning-rate control.
     """
 
     def __init__(
@@ -122,6 +218,18 @@ class NeuralGasPCA:
         self.iteration = 0
 
     def initialize(self, data: np.ndarray) -> "NeuralGasPCA":
+        """Initialize local PCA units from a data array.
+
+        Args:
+            data: Two-dimensional array of observations.
+
+        Returns:
+            ``self`` with initialized units and unit recursions.
+
+        Raises:
+            ValueError: If data are not two-dimensional, have fewer than two
+                features, or cannot support the requested PCA dimensionality.
+        """
         data = _as_2d(data)
         n_samples, n_features = data.shape
         if n_features < 2:
@@ -170,6 +278,15 @@ class NeuralGasPCA:
         return self
 
     def advance(self, observations: np.ndarray) -> "NeuralGasPCA":
+        """Process one observation or a stream of observations.
+
+        Args:
+            observations: Array with shape ``(n_features,)`` or
+                ``(n_observations, n_features)``.
+
+        Returns:
+            ``self`` after all observations have been processed.
+        """
         data = _as_observations(observations)
         if not self.units:
             self.initialize(data)
@@ -244,9 +361,11 @@ class NeuralGasPCA:
                 unit.activity *= self.number_units / activity_sum
 
     def centers(self) -> np.ndarray:
+        """Return local PCA unit centers stacked by unit."""
         return np.vstack([unit.center for unit in self.units])
 
     def labels(self, data: np.ndarray) -> np.ndarray:
+        """Assign each observation to its best-ranked local PCA unit."""
         data = _as_2d(data)
         return np.array([min(self._rank_for(x), key=lambda item: item[1])[0] for x in data], dtype=int)
 
@@ -304,6 +423,7 @@ class NeuralGasPCA:
 
 
 def _as_2d(data: np.ndarray) -> np.ndarray:
+    """Coerce an array-like object to a two-dimensional observation matrix."""
     data = np.asarray(data, dtype=float)
     if data.ndim != 2:
         raise ValueError("data must be a two-dimensional array")
@@ -311,6 +431,7 @@ def _as_2d(data: np.ndarray) -> np.ndarray:
 
 
 def _as_observations(observations: np.ndarray) -> np.ndarray:
+    """Coerce one observation or a batch to a two-dimensional array."""
     data = np.asarray(observations, dtype=float)
     if data.ndim == 1:
         return data.reshape(1, -1)

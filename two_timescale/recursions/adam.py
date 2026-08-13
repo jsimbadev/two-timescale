@@ -1,4 +1,35 @@
-"""Adam recursions composed from smoothed statistic transforms."""
+r"""Adam recursions composed from smoothed statistic transforms.
+
+Adam estimates first and second raw moments of an incoming gradient-like vector
+``g_t`` and uses their bias-corrected ratio as a coordinate-wise preconditioner:
+
+.. math::
+
+    m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t,\qquad
+    v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t^2,
+
+.. math::
+
+    \hat{m}_t = m_t / (1 - \beta_1^t),\qquad
+    \hat{v}_t = v_t / (1 - \beta_2^t).
+
+The update direction returned by :class:`AdamPreconditioner` is
+
+.. math::
+
+    \hat{m}_t / (\sqrt{\hat{v}_t} + \epsilon).
+
+The outer :class:`Adam` recursion then applies its own step size ``alpha``.
+This package stores the moment smoothing coefficients as ``first_step_size`` and
+``second_step_size``.  With fixed coefficients these are ``1 - beta_1`` and
+``1 - beta_2`` in the paper's notation.
+
+References:
+    Kingma2017_S4S7KAT3:
+        Kingma, D. P., & Ba, J. (2017). Adam: A Method for Stochastic
+        Optimization. arXiv:1412.6980. Algorithm 1. Zotero item key
+        ``S4S7KAT3``.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +47,12 @@ StepSize = float | Control | Callable[[RecursionContext | None], float]
 
 @dataclass
 class AdamMoments:
-    """First and second Adam moment states."""
+    """First and second Adam moment states.
+
+    Args:
+        first: First moment estimate ``m_t``.
+        second: Second raw moment estimate ``v_t``.
+    """
 
     first: np.ndarray
     second: np.ndarray
@@ -24,12 +60,19 @@ class AdamMoments:
 
 @dataclass
 class AdamStepSize:
-    """Named scalar step size for Adam's outer recursion."""
+    """Named scalar step size for Adam's outer recursion.
+
+    Args:
+        step_size: Fixed scalar, callable schedule, or control representing the
+            Adam paper's ``alpha``.
+        name: Human-readable name used in composed vector fields.
+    """
 
     step_size: StepSize = 0.001
     name: str = "adam_step_size"
 
     def value(self, context: RecursionContext | None = None) -> float:
+        """Return the non-negative outer step size for ``context``."""
         value = _step_value(self.step_size, context)
         if value < 0.0:
             raise ValueError("step_size must be non-negative")
@@ -38,7 +81,31 @@ class AdamStepSize:
 
 @dataclass
 class AdamPreconditioner:
-    """Coordinate-wise Adam transform built from smoothed gradient statistics."""
+    r"""Coordinate-wise Adam transform built from smoothed moments.
+
+    This object owns Adam's slow state: the first-moment recursion, the
+    second-raw-moment recursion, and the two scalar bias recursions.  It does
+    not apply the outer step size ``alpha``.  Instead, :meth:`update` returns the
+    preconditioned vector field
+
+    .. math::
+
+        P_t(g_t) = \hat{m}_t / (\sqrt{\hat{v}_t} + \epsilon),
+
+    so any outer recursion can choose how to scale or compose it.
+
+    Args:
+        first_moment: Smoothed statistic transform holding ``m_t``.
+        second_moment: Smoothed statistic transform holding ``v_t``.
+        first_bias: EMA recursion used for the first-moment initialization
+            correction.  With a fixed ``first_step_size = 1 - beta_1``, its
+            state is ``1 - beta_1 ** t``.
+        second_bias: EMA recursion used for the second-moment initialization
+            correction.  With a fixed ``second_step_size = 1 - beta_2``, its
+            state is ``1 - beta_2 ** t``.
+        epsilon: Positive denominator stabilizer.
+        name: Human-readable preconditioner name.
+    """
 
     first_moment: SmoothedStatisticTransform[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     second_moment: SmoothedStatisticTransform[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
@@ -58,6 +125,29 @@ class AdamPreconditioner:
         name: str = "adam_preconditioner",
         iteration: int = 0,
     ) -> "AdamPreconditioner":
+        """Construct an Adam preconditioner with optional initial moments.
+
+        Args:
+            shape: Shape of gradient vectors consumed by this preconditioner.
+            moments: Optional initial first and second moment states.  If
+                omitted, both start at zero.
+            first_step_size: EMA coefficient for first moments.  For paper
+                defaults this is ``1 - beta_1``.
+            second_step_size: EMA coefficient for second raw moments.  For
+                paper defaults this is ``1 - beta_2``.
+            epsilon: Positive denominator stabilizer.
+            name: Human-readable preconditioner name.
+            iteration: Initial iteration for all owned recursions.
+
+        Returns:
+            Configured Adam preconditioner.
+
+        Raises:
+            ValueError: If moments have incompatible shapes, if a moment
+                smoothing coefficient is outside ``(0, 1]``, or if
+                ``epsilon <= 0``.
+            RuntimeError: If supplied recursions are not iteration-synchronized.
+        """
         if moments is None:
             moments = AdamMoments(
                 first=np.zeros(shape, dtype=float),
@@ -125,24 +215,33 @@ class AdamPreconditioner:
 
     @property
     def first_average(self) -> EMARecursion[np.ndarray]:
+        """EMA recursion storing Adam's first moment ``m_t``."""
         return self.first_moment.statistic_average
 
     @property
     def second_average(self) -> EMARecursion[np.ndarray]:
+        """EMA recursion storing Adam's second raw moment ``v_t``."""
         return self.second_moment.statistic_average
 
     @property
     def iteration(self) -> int:
+        """Shared iteration count of the moment recursions."""
         return self.first_average.iteration
 
     @property
     def moments(self) -> AdamMoments:
+        """Current biased moment estimates."""
         return AdamMoments(
             first=np.asarray(self.first_average.state),
             second=np.asarray(self.second_average.state),
         )
 
     def corrected_moments(self) -> AdamMoments:
+        """Return bias-corrected Adam moment estimates.
+
+        Returns:
+            Pair ``(m_hat, v_hat)`` using the current scalar bias recursions.
+        """
         first_bias = max(float(self.first_bias.state), np.finfo(float).tiny)
         second_bias = max(float(self.second_bias.state), np.finfo(float).tiny)
         return AdamMoments(
@@ -155,6 +254,21 @@ class AdamPreconditioner:
         delta: np.ndarray,
         context: RecursionContext | None = None,
     ) -> np.ndarray:
+        """Update moments from one vector-field value and precondition it.
+
+        Args:
+            delta: Gradient-like vector ``g_t`` or generic innovation to
+                precondition.
+            context: Optional recursion context.
+
+        Returns:
+            Coordinate-wise Adam direction ``m_hat / (sqrt(v_hat) + epsilon)``.
+
+        Raises:
+            ValueError: If ``delta`` shape or smoothing coefficients are invalid.
+            RuntimeError: If the owned moment and bias recursions drift out of
+                sync.
+        """
         delta = np.asarray(delta, dtype=float)
         _validate_matching_shape(
             np.asarray(self.first_average.state),
@@ -190,6 +304,15 @@ class AdamPreconditioner:
         field: VectorField,
         name: str | None = None,
     ) -> VectorField:
+        """Wrap a vector field with this Adam preconditioner.
+
+        Args:
+            field: Field whose output should be Adam-preconditioned.
+            name: Optional name for the composed vector field.
+
+        Returns:
+            Vector field evaluating ``self.update(field(...))``.
+        """
         def preconditioned(state: object, observation: object, context: RecursionContext) -> np.ndarray:
             return self.update(field(state, observation, context), context)
 
@@ -198,7 +321,27 @@ class AdamPreconditioner:
 
 @dataclass
 class Adam:
-    """Track a state with Adam-scaled stochastic-approximation innovations."""
+    r"""Track a vector state with an Adam-preconditioned recursion.
+
+    This is the convenience composition
+
+    .. math::
+
+        \theta_{t+1}
+          = \theta_t + \alpha_t
+            \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon},
+
+    where the signs are determined by the supplied ``innovation``.  Pass
+    negative gradients for minimization in the paper's convention, or pass any
+    vector field whose direction already has the intended sign.
+
+    Args:
+        state: Initial outer recursion state.
+        preconditioner: Adam preconditioner owning moment and bias recursions.
+        step_size: Outer step size ``alpha``.
+        name: Human-readable recursion name.
+        iteration: Initial iteration of the outer recursion.
+    """
 
     state: np.ndarray
     preconditioner: AdamPreconditioner
@@ -218,6 +361,23 @@ class Adam:
         name: str = "adam",
         iteration: int = 0,
     ) -> "Adam":
+        """Construct the standard Adam wrapper around a state vector.
+
+        Args:
+            state: Initial state vector.
+            moments: Optional initial first and second moment states.
+            step_size: Outer step size ``alpha``.
+            first_step_size: EMA coefficient for first moments.  For paper
+                defaults this is ``1 - beta_1``.
+            second_step_size: EMA coefficient for second raw moments.  For
+                paper defaults this is ``1 - beta_2``.
+            epsilon: Positive denominator stabilizer.
+            name: Human-readable recursion name.
+            iteration: Initial iteration of all owned recursions.
+
+        Returns:
+            Adam recursion ready to consume innovations.
+        """
         state_array = np.array(state, dtype=float, copy=True)
         return cls(
             state=state_array,
@@ -256,25 +416,31 @@ class Adam:
 
     @property
     def first_average(self) -> EMARecursion[np.ndarray]:
+        """EMA recursion storing Adam's first moment."""
         return self.preconditioner.first_average
 
     @property
     def second_average(self) -> EMARecursion[np.ndarray]:
+        """EMA recursion storing Adam's second raw moment."""
         return self.preconditioner.second_average
 
     @property
     def first_bias(self) -> EMARecursion[float]:
+        """EMA recursion storing the first-moment initialization correction."""
         return self.preconditioner.first_bias
 
     @property
     def second_bias(self) -> EMARecursion[float]:
+        """EMA recursion storing the second-moment initialization correction."""
         return self.preconditioner.second_bias
 
     @property
     def moments(self) -> AdamMoments:
+        """Current biased Adam moments."""
         return self.preconditioner.moments
 
     def corrected_moments(self) -> AdamMoments:
+        """Current bias-corrected Adam moments."""
         return self.preconditioner.corrected_moments()
 
     def update(
@@ -282,6 +448,15 @@ class Adam:
         innovation: np.ndarray,
         context: RecursionContext | None = None,
     ) -> np.ndarray:
+        """Advance the outer state by one Adam-preconditioned innovation.
+
+        Args:
+            innovation: Gradient-like vector or vector-field value.
+            context: Optional recursion context.
+
+        Returns:
+            Updated outer state.
+        """
         innovation = np.asarray(innovation, dtype=float)
         _validate_matching_shape(self.state, innovation, "state", "innovation")
         if context is None:

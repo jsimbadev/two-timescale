@@ -1,8 +1,8 @@
-# Adaptive Controls for GMM Recursions
+# Adaptive Step-Size Sources for GMM Recursions
 
-The comparison script exercises one fixed-step online GMM, one Robbins-Monro
-scheduled online GMM, and three adaptive controls. The GMM recursion itself
-remains the stochastic-EM moment recursion
+The comparison script exercises one fixed-step online GMM, one
+polynomial-decay scheduled online GMM, and three adaptive step-size sources.
+The GMM recursion itself remains the online moment recursion
 
 ```math
 \theta_{n+1}
@@ -18,25 +18,25 @@ T(x_n;\theta_n) - \theta_n
 where `theta = (mass, first, second)` and
 `T(x; theta) = (r, r x, r x x^T)`.
 
-The controls live outside the GMM vector field. Each control observes the
+The step-size sources live outside the GMM vector field. Each one observes the
 current GMM moment recursion and the current observation, updates a smoothed
 diagnostic statistic, then exposes a scalar `value(...)` used as the next GMM
 step size.
 
-## Controls
+## Step-Size Sources
 
 - `AdaptiveGMMGain`: reuses `AdaptiveGainRecursions` on the responsibility
   mismatch `r_n - w_n`.
 - `SmoothedCovarianceControl`: smooths componentwise local covariance
   observations `(x_n - mu_k)(x_n - mu_k)^T` and maps their relative mismatch
   with `Sigma_k` to a gain.
-- `SmoothedMomentResidualControl`: smooths the full stochastic-EM residual
+- `SmoothedMomentResidualControl`: smooths the full GMM moment residual
   `T(x_n; theta_n) - theta_n` and maps its relative norm to a gain.
 
-This keeps the model recursion task-agnostic while making the adaptive-control
+This keeps the model recursion task-agnostic while making the adaptive
 diagnostic explicit and swappable.
 
-The Robbins-Monro baseline uses
+The polynomial-decay baseline uses
 
 ```math
 \alpha_n =

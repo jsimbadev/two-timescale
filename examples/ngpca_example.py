@@ -1,4 +1,10 @@
-"""Neural Gas PCA example using DistGen samples and the local MATLAB defaults."""
+"""Neural Gas PCA example using DistGen samples and MATLAB-compatible defaults.
+
+The example mirrors the data path, random stream, initialization mode, and JSON
+schema used by the companion MATLAB NGPCA scripts.  It is intentionally a thin
+script around :class:`two_timescale.ngpca.NeuralGasPCA` so numerical
+differences are easier to inspect.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +30,16 @@ DEFAULT_PCA_DIMENSIONALITY = 2
 
 
 class MatlabTwister:
-    """MATLAB rng(0,'twister') compatible rand stream."""
+    """MATLAB ``rng(seed, "twister")`` compatible random stream.
+
+    The class implements the MT19937 state transition and MATLAB's double
+    generation convention closely enough for this example's initialization and
+    sampling path.
+
+    Args:
+        seed: MATLAB-style seed.  The value ``0`` maps to MT19937's historical
+            default seed ``5489`` for compatibility with the reference script.
+    """
 
     _N = 624
     _M = 397
@@ -40,6 +55,7 @@ class MatlabTwister:
         self.seed(seed)
 
     def seed(self, seed: int) -> None:
+        """Reset the generator state from a MATLAB-style seed."""
         mt_seed = 5489 if seed == 0 else int(seed)
         self._state[0] = mt_seed & 0xFFFFFFFF
         for index in range(1, self._N):
@@ -48,6 +64,7 @@ class MatlabTwister:
         self._index = self._N
 
     def random(self, size: int | tuple[int, ...] | None = None) -> float | np.ndarray:
+        """Return uniform random values in MATLAB column-major order."""
         if size is None:
             return self._rand_float()
         if isinstance(size, int):
@@ -56,6 +73,7 @@ class MatlabTwister:
         return values.reshape(size, order="F")
 
     def integers(self, low: int, high: int | None = None) -> int:
+        """Return one integer sampled from ``[low, high)``."""
         if high is None:
             high = low
             low = 0
@@ -91,11 +109,24 @@ class MatlabTwister:
 
 
 def default_distgen_csv_path(sample_name: str = DEFAULT_SAMPLE_NAME) -> Path:
+    """Return the default DistGen CSV path for a sample name."""
     project_root = Path(__file__).resolve().parents[1]
     return project_root.parent / "geometry_experiments" / "GeomDiagnostics.jl" / "outputs" / f"{sample_name}.csv"
 
 
 def load_distgen_data(path: Path) -> np.ndarray:
+    """Load a DistGen CSV file as a two-dimensional floating array.
+
+    Args:
+        path: CSV path to read.
+
+    Returns:
+        Observation matrix.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ValueError: If the file has fewer than two columns.
+    """
     if not path.is_file():
         raise FileNotFoundError(f"CSV file not found at: {path}")
     data = np.loadtxt(path, delimiter=",")
@@ -113,6 +144,17 @@ def run(
     num_units: int | None = None,
     iterations: int = DEFAULT_ITERATIONS,
 ) -> tuple[NeuralGasPCA, np.ndarray]:
+    """Fit the NGPCA example model.
+
+    Args:
+        data_path: Optional explicit CSV path.
+        sample_name: DistGen sample name used when ``data_path`` is omitted.
+        num_units: Optional number of local PCA units.
+        iterations: Number of streamed observations sampled with replacement.
+
+    Returns:
+        Tuple ``(model, data)`` containing the fitted model and source data.
+    """
     rng = MatlabTwister(0)
     sample_name = sample_name or os.getenv("SAMPLE_NAME") or DEFAULT_SAMPLE_NAME
     data = load_distgen_data(data_path or default_distgen_csv_path(sample_name))
@@ -134,7 +176,16 @@ def run(
 
 
 def plot(model: NeuralGasPCA, data: np.ndarray, ax: Any | None = None) -> tuple[Any, Any]:
-    """Plot data and local PCA units like the reference MATLAB NGPCA examples."""
+    """Plot data and local PCA units like the reference MATLAB examples.
+
+    Args:
+        model: Fitted NGPCA model.
+        data: Observation matrix with at least two columns.
+        ax: Optional Matplotlib axes.
+
+    Returns:
+        Tuple ``(figure, ax)``.
+    """
 
     plt = _load_pyplot()
     if ax is None:
@@ -163,7 +214,7 @@ def plot(model: NeuralGasPCA, data: np.ndarray, ax: Any | None = None) -> tuple[
 
 
 def to_matlab_json_dict(model: NeuralGasPCA) -> dict[str, Any]:
-    """Serialize a fitted model with the same field names as ngpca_to_json.m."""
+    """Serialize a fitted model with the MATLAB ``ngpca_to_json.m`` schema."""
 
     params = model.params
     n_features = 0 if not model.units else int(model.units[0].center.size)
@@ -202,6 +253,7 @@ def _initial_gain(model: NeuralGasPCA) -> float:
 
 
 def save_matlab_json(model: NeuralGasPCA, path: Path) -> None:
+    """Write the MATLAB-schema JSON serialization for a fitted model."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(to_matlab_json_dict(model), separators=(",", ":")))
 

@@ -1,4 +1,11 @@
-"""State-tracking stochastic approximation recursions."""
+r"""State-tracking stochastic approximation recursions.
+
+This module provides the simplest vector-valued recursion used by NGPCA:
+
+.. math::
+
+    z_{t+1} = z_t + a_t \Delta_t.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +18,13 @@ from ..core import Recursion, RecursionContext, VectorField
 
 @dataclass
 class StateTrackingRecursion:
-    """Track a vector state with update state <- state + step_size * innovation."""
+    """Track a vector state with additive innovations.
+
+    Args:
+        state: Initial vector state.
+        name: Human-readable recursion and vector-field name.
+        iteration: Initial iteration counter.
+    """
 
     state: np.ndarray
     name: str = "state_tracking"
@@ -19,6 +32,7 @@ class StateTrackingRecursion:
 
     @classmethod
     def new(cls, state: np.ndarray, name: str = "state_tracking") -> "StateTrackingRecursion":
+        """Construct a vector tracking recursion with copied state."""
         return cls(state, name=name)
 
     def __post_init__(self) -> None:
@@ -37,6 +51,16 @@ class StateTrackingRecursion:
         step_size: float,
         context: RecursionContext | None = None,
     ) -> np.ndarray:
+        """Advance the vector state by one scaled innovation.
+
+        Args:
+            innovation: Vector delta before step-size scaling.
+            step_size: Scalar update coefficient.
+            context: Optional recursion context.
+
+        Returns:
+            Updated vector state.
+        """
         if context is None:
             context = RecursionContext(iteration=self.recursion.iteration)
         self.recursion.step_size = float(step_size)

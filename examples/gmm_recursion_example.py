@@ -12,6 +12,14 @@ from two_timescale import GaussianMixtureRecursion, LearningRate
 
 
 def make_mixture(seed: int = 1) -> np.ndarray:
+    """Generate a simple three-component two-dimensional mixture.
+
+    Args:
+        seed: Random seed for synthetic observations.
+
+    Returns:
+        Observation matrix with shape ``(840, 2)``.
+    """
     rng = np.random.default_rng(seed)
     left = rng.normal(loc=(-2.5, 0.0), scale=(0.45, 0.8), size=(300, 2))
     right = rng.normal(loc=(2.0, 1.0), scale=(0.7, 0.35), size=(300, 2))
@@ -20,6 +28,11 @@ def make_mixture(seed: int = 1) -> np.ndarray:
 
 
 def run() -> tuple[GaussianMixtureRecursion, np.ndarray]:
+    """Fit the example GMM recursion on a shuffled synthetic stream.
+
+    Returns:
+        Tuple ``(model, data)`` containing the fitted model and source data.
+    """
     rng = np.random.default_rng(10)
     data = make_mixture(seed=10)
     model = GaussianMixtureRecursion(
@@ -34,7 +47,16 @@ def run() -> tuple[GaussianMixtureRecursion, np.ndarray]:
 
 
 def plot(model: GaussianMixtureRecursion, data: np.ndarray, ax: Any | None = None) -> tuple[Any, Any]:
-    """Plot observations and covariance ellipses for the GMM recursion."""
+    """Plot observations and covariance ellipses for the GMM recursion.
+
+    Args:
+        model: Fitted GMM recursion.
+        data: Observation matrix.
+        ax: Optional Matplotlib axes.
+
+    Returns:
+        Tuple ``(figure, ax)``.
+    """
 
     plt = _load_pyplot()
     if ax is None:

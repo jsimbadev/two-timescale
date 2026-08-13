@@ -1,4 +1,30 @@
-"""Error-forgetting robust recursive least-squares eigensystem recursion."""
+r"""Error-forgetting robust recursive least-squares eigensystem recursion.
+
+This module implements the local PCA shape update used by NGPCA.  The update
+recursively maintains an orthonormal basis ``W`` and principal eigenvalue vector
+``lambda`` from a centered observation ``xi`` and projection ``y = W.T @ xi``.
+The paper describes the recursive eigenvector form
+
+.. math::
+
+    w_i = \sum_{j=1}^{i}(q_{i,j} w_j + p_i x),
+
+and the eigenvalue update
+
+.. math::
+
+    \lambda_i^2
+      := (\epsilon\lambda_i)^2
+         + (1 - \epsilon)y_i
+           (2\epsilon\lambda_i y_i + (1 - \epsilon)d_i y_i).
+
+References:
+    Migenda02/2_RGHQJ3PP:
+        Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
+        Principal Component Analysis improves the clustering of
+        high-dimensional data. *Pattern Recognition*, 146, 110030. Equations
+        (6)--(8). Zotero item key ``RGHQJ3PP``.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +37,27 @@ from ..core import Recursion, RecursionContext, VectorField
 
 @dataclass
 class EFORRLSAState:
+    """Local PCA shape state.
+
+    Args:
+        weight: Basis matrix ``W`` with one eigenvector per column.
+        eigenvalue: Principal eigenvalue vector ``lambda``.
+    """
+
     weight: np.ndarray
     eigenvalue: np.ndarray
 
 
 @dataclass(frozen=True)
 class EFORRLSAObservation:
+    """Observation passed to the EFORRLSA shape recursion.
+
+    Args:
+        x_c: Centered observation ``x - c``.
+        y: Projection ``W.T @ (x - c)`` computed before the shape update.
+        alpha: Effective local learning rate for this unit.
+    """
+
     x_c: np.ndarray
     y: np.ndarray
     alpha: float
@@ -24,13 +65,19 @@ class EFORRLSAObservation:
 
 @dataclass
 class EFORRLSARecursion:
-    """Robust recursive least-squares eigensystem update as a recursion."""
+    """Robust recursive least-squares eigensystem update as a recursion.
+
+    Args:
+        state: Initial local PCA shape state.
+        iteration: Initial iteration counter.
+    """
 
     state: EFORRLSAState
     iteration: int = 0
 
     @classmethod
     def new(cls, state: EFORRLSAState) -> "EFORRLSARecursion":
+        """Construct a shape recursion from an initial basis and eigenvalues."""
         return cls(state)
 
     def __post_init__(self) -> None:
@@ -53,6 +100,17 @@ class EFORRLSARecursion:
         alpha: float,
         context: RecursionContext | None = None,
     ) -> EFORRLSAState:
+        """Update the PCA basis and eigenvalue estimates.
+
+        Args:
+            x_c: Centered observation ``x - c``.
+            y: Projection of ``x_c`` onto the pre-update basis.
+            alpha: Effective local learning rate.
+            context: Optional recursion context.
+
+        Returns:
+            Updated shape state.
+        """
         if context is None:
             context = RecursionContext(iteration=self.recursion.iteration)
         self.state = self.recursion.advance(EFORRLSAObservation(x_c=x_c, y=y, alpha=float(alpha)), context)
@@ -92,9 +150,14 @@ def _eforrlsa_next_state(state: EFORRLSAState, observation: EFORRLSAObservation)
     d = float(x_c @ x_c)
 
     for i in range(m):
+        # The paper writes the eigenvalue update in terms of epsilon; here
+        # ``alpha_l`` and ``beta_y`` are the two scalar factors reused by the
+        # Gram-Schmidt-like interlocked update.
         alpha_l = (1.0 - alpha) * eigenvalue[i]
         beta_y = alpha * y[i]
         if i > 0:
+            # ``d`` is the remaining squared norm after deflating already
+            # processed principal directions.
             t += p[i - 1] * p[i - 1]
             d = max(0.0, d - y[i - 1] * y[i - 1])
 
@@ -106,6 +169,8 @@ def _eforrlsa_next_state(state: EFORRLSAState, observation: EFORRLSAObservation)
 
         column = p[i] * x_c
         for j in range(i + 1):
+            # ``q`` and ``r`` encode the triangular correction coefficients
+            # used to keep the updated basis orthonormal.
             if j < i:
                 r[i, j] = r[i - 1, j] + p[i - 1] * q[i - 1, j]
                 q[i, j] = -(beta_y * y[j] + s * r[i, j]) / n
