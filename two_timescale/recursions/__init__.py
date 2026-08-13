@@ -1,6 +1,6 @@
 """Named stochastic recursions used by two-timescale algorithms."""
 
-from .adaptive_gain import AdaptiveGainRecursions
+from .adaptive_gain import AdaptiveGainObservation, AdaptiveGainRecursions
 from .adam import Adam, AdamMoments, AdamPreconditioner, AdamStepSize
 from .eforrlsa import EFORRLSAObservation, EFORRLSARecursion, EFORRLSAState
 from .gmm_moments import (
@@ -18,6 +18,7 @@ from .state_tracking import StateTrackingRecursion
 
 __all__ = [
     "AdaptiveGainRecursions",
+    "AdaptiveGainObservation",
     "Adam",
     "AdamMoments",
     "AdamPreconditioner",

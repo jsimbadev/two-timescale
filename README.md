@@ -40,11 +40,11 @@ average.advance(5.0)
 
 NGPCA exposes the paper's online update as `advance`. Pass a single observation
 or a two-dimensional stream; the caller owns any random sampling policy. Inside
-each local PCA unit, the adaptive learning-rate filters are `EMARecursion`
-objects. The update step composes those filters with generic stochastic
-approximation objects: `StateTrackingRecursion` for the center,
-`EFORRLSARecursion` for the eigensystem, and `ScalarTrackingRecursion` for the
-unrepresented variance.
+each local PCA unit, the adaptive gain is declared as smoothed diagnostic
+statistics for the residual signal, projected signal, and eigenvalues. The
+update step composes those statistics with generic stochastic approximation
+objects: `StateTrackingRecursion` for the center, `EFORRLSARecursion` for the
+eigensystem, and `ScalarTrackingRecursion` for the unrepresented variance.
 
 ```python
 from two_timescale import NGPCAParameters, NamedPotential, NeuralGasPCA

@@ -1,4 +1,4 @@
-"""Controls built from smoothed diagnostic statistics."""
+"""Transforms and scalar gains built from smoothed diagnostic statistics."""
 
 from __future__ import annotations
 
@@ -101,8 +101,9 @@ class SmoothedStatisticTransform(Generic[State, Observation, Statistic, Transfor
         self,
         state: State,
         observation: Observation,
+        step_size: StepSize | None = None,
         context: RecursionContext | None = None,
     ) -> Transform:
         statistic = self.diagnostic(state, observation, context)
-        self.statistic_average.advance(statistic, context=context)
+        self.statistic_average.advance(statistic, step_size=step_size, context=context)
         return self.statistic_map(self.statistic_average.state, state, observation, context)

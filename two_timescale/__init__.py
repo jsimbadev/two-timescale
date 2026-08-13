@@ -20,6 +20,7 @@ from .ngpca import (
 )
 from .potentials import LocalPCAGeometry, NamedPotential, PotentialFunction, PotentialName, as_potential
 from .recursions import (
+    AdaptiveGainObservation,
     AdaptiveGainRecursions,
     Adam,
     AdamMoments,
@@ -37,6 +38,7 @@ from .recursions import (
 
 __all__ = [
     "AdaptiveGMMGain",
+    "AdaptiveGainObservation",
     "AdaptiveGainRecursions",
     "Adam",
     "AdamMoments",
