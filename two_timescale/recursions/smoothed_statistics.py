@@ -5,14 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Generic, TypeAlias, TypeVar
 
-from ..core import EMARecursion, RecursionContext
+from ..core import Control, EMARecursion, RecursionContext
 
 State = TypeVar("State")
 Observation = TypeVar("Observation")
 Statistic = TypeVar("Statistic")
+Transform = TypeVar("Transform")
 
 Diagnostic: TypeAlias = Callable[[State, Observation, RecursionContext | None], Statistic]
 GainMap: TypeAlias = Callable[[Statistic, State, Observation, RecursionContext | None], float]
+StatisticMap: TypeAlias = Callable[[Statistic, State, Observation, RecursionContext | None], Transform]
+StepSize: TypeAlias = float | Control | Callable[[RecursionContext | None], float]
 
 
 @dataclass
@@ -69,3 +72,37 @@ class SmoothedStatisticControl(Generic[State, Observation, Statistic]):
         )
         self.gain = float(self.gain_map(self.statistic_average.state, state, observation, context))
         return self.value(context)
+
+
+@dataclass
+class SmoothedStatisticTransform(Generic[State, Observation, Statistic, Transform]):
+    """Transform derived from an EMA-smoothed diagnostic statistic."""
+
+    statistic_average: EMARecursion[Statistic]
+    diagnostic: Diagnostic
+    statistic_map: StatisticMap
+
+    @classmethod
+    def new(
+        cls,
+        initial_statistic: Statistic,
+        diagnostic: Diagnostic,
+        statistic_map: StatisticMap,
+        step_size: StepSize = 0.03,
+        name: str = "smoothed_statistic",
+    ) -> "SmoothedStatisticTransform[State, Observation, Statistic, Transform]":
+        return cls(
+            statistic_average=EMARecursion(initial_statistic, step_size=step_size, name=name),
+            diagnostic=diagnostic,
+            statistic_map=statistic_map,
+        )
+
+    def update(
+        self,
+        state: State,
+        observation: Observation,
+        context: RecursionContext | None = None,
+    ) -> Transform:
+        statistic = self.diagnostic(state, observation, context)
+        self.statistic_average.advance(statistic, context=context)
+        return self.statistic_map(self.statistic_average.state, state, observation, context)

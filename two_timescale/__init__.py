@@ -21,18 +21,27 @@ from .ngpca import (
 from .potentials import LocalPCAGeometry, NamedPotential, PotentialFunction, PotentialName, as_potential
 from .recursions import (
     AdaptiveGainRecursions,
+    Adam,
+    AdamMoments,
+    AdamPreconditioner,
+    AdamStepSize,
     EFORRLSAObservation,
     EFORRLSARecursion,
     EFORRLSAState,
     GMMMomentRecursion,
     ScalarTrackingRecursion,
     SmoothedStatisticControl,
+    SmoothedStatisticTransform,
     StateTrackingRecursion,
 )
 
 __all__ = [
     "AdaptiveGMMGain",
     "AdaptiveGainRecursions",
+    "Adam",
+    "AdamMoments",
+    "AdamPreconditioner",
+    "AdamStepSize",
     "Control",
     "DEFAULT_NGPCA_INITIAL_GAIN",
     "EMARecursion",
@@ -59,6 +68,7 @@ __all__ = [
     "SmoothedCovarianceControl",
     "SmoothedMomentResidualControl",
     "SmoothedStatisticControl",
+    "SmoothedStatisticTransform",
     "StateTrackingRecursion",
     "VectorField",
     "as_potential",

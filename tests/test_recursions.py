@@ -15,7 +15,7 @@ from two_timescale.recursions.gmm_moments import (
     responsibilities,
 )
 from two_timescale.recursions.scalar_tracking import ScalarTrackingRecursion
-from two_timescale.recursions.smoothed_statistics import SmoothedStatisticControl
+from two_timescale.recursions.smoothed_statistics import SmoothedStatisticControl, SmoothedStatisticTransform
 from two_timescale.recursions.state_tracking import StateTrackingRecursion
 
 
@@ -136,6 +136,20 @@ class RecursionModuleTests(unittest.TestCase):
 
         np.testing.assert_allclose(control.statistic_average.state, np.array([1.0, 0.0]))
         self.assertEqual(gain, 0.6)
+
+    def test_smoothed_statistic_transform_updates_average_and_maps_statistic(self) -> None:
+        transform = SmoothedStatisticTransform.new(
+            initial_statistic=np.array([0.0, 0.0]),
+            diagnostic=lambda state, observation, context: observation - state,
+            statistic_map=lambda statistic, state, observation, context: statistic * statistic,
+            step_size=0.5,
+            name="test_transform",
+        )
+
+        mapped = transform.update(np.array([1.0, 1.0]), np.array([3.0, 1.0]))
+
+        np.testing.assert_allclose(transform.statistic_average.state, np.array([1.0, 0.0]))
+        np.testing.assert_allclose(mapped, np.array([1.0, 0.0]))
 
     def test_gmm_responsibilities_are_probabilities(self) -> None:
         state = GMMMoments(
