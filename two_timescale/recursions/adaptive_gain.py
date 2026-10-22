@@ -29,11 +29,11 @@ The scalar gain is then
         {\bar{\eta}_{j,i} + \bar{\lambda}_{j,i}}\right|.
 
 References:
-    Migenda02/2_RGHQJ3PP:
+    Migenda, Moeller, and Schenck (2024):
         Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
         Principal Component Analysis improves the clustering of
         high-dimensional data. *Pattern Recognition*, 146, 110030.
-        Equations (17)--(20). Zotero item key ``RGHQJ3PP``.
+        Equations (17)--(20).
 """
 
 from __future__ import annotations

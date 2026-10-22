@@ -13,10 +13,9 @@ object also represents auxiliary recursions, so an adaptive step size can be
 the state of another recursion rather than a fixed float.
 
 References:
-    Kushner2003_RUQZUAC7:
+    Kushner and Yin (2003):
         Kushner, H. J., & Yin, G. (2003). *Stochastic Approximation and
-        Recursive Algorithms and Applications*. Springer New York. Zotero item
-        key ``RUQZUAC7``.
+        Recursive Algorithms and Applications*. Springer New York.
 """
 
 from __future__ import annotations

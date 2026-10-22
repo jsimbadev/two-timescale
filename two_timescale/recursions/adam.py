@@ -25,10 +25,9 @@ This package stores the moment smoothing coefficients as ``first_step_size`` and
 ``1 - beta_2`` in the paper's notation.
 
 References:
-    Kingma2017_S4S7KAT3:
+    Kingma and Ba (2017):
         Kingma, D. P., & Ba, J. (2017). Adam: A Method for Stochastic
-        Optimization. arXiv:1412.6980. Algorithm 1. Zotero item key
-        ``S4S7KAT3``.
+        Optimization. arXiv:1412.6980. Algorithm 1.
 """
 
 from __future__ import annotations

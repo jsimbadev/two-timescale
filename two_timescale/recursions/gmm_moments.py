@@ -18,10 +18,10 @@ The parameters exposed to callers are recovered as
     \Sigma_k = Q_k / s_k - \mu_k\mu_k^\top.
 
 References:
-    Kushner2003_RUQZUAC7:
+    Kushner and Yin (2003):
         Kushner, H. J., & Yin, G. (2003). *Stochastic Approximation and
         Recursive Algorithms and Applications*. Springer New York. General
-        stochastic-approximation background; Zotero item key ``RUQZUAC7``.
+        stochastic-approximation background.
 """
 
 from __future__ import annotations

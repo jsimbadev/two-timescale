@@ -14,11 +14,11 @@ where the second term is present only when the retained PCA dimensionality is
 smaller than the observation dimensionality.
 
 References:
-    Migenda02/2_RGHQJ3PP:
+    Migenda, Moeller, and Schenck (2024):
         Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
         Principal Component Analysis improves the clustering of
         high-dimensional data. *Pattern Recognition*, 146, 110030. Equations
-        (23), (24), (32), (33), (37), and (38). Zotero item key ``RGHQJ3PP``.
+        (23), (24), (32), (33), (37), and (38).
 """
 
 from __future__ import annotations

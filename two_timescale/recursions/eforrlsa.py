@@ -19,11 +19,11 @@ and the eigenvalue update
            (2\epsilon\lambda_i y_i + (1 - \epsilon)d_i y_i).
 
 References:
-    Migenda02/2_RGHQJ3PP:
+    Migenda, Moeller, and Schenck (2024):
         Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
         Principal Component Analysis improves the clustering of
         high-dimensional data. *Pattern Recognition*, 146, 110030. Equations
-        (6)--(8). Zotero item key ``RGHQJ3PP``.
+        (6)--(8).
 """
 
 from __future__ import annotations

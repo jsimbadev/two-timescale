@@ -1,82 +1,58 @@
 # two-timescale
 
-Composable Python abstractions for multiple-timescale stochastic recursions.
-The first concrete model is Neural Gas PCA, based on the update structure in
-Migenda, Moeller, and Schenck, "Adaptive local Principal Component Analysis
-improves the clustering of high-dimensional data" (Pattern Recognition, 2024).
+Composable Python abstractions for online stochastic recursions.
 
-The core abstraction is:
+The library is built around the stochastic-approximation recursion
 
-```python
-z[n + 1] = z[n] + a[n] * F(z[n], x[n])
+```math
+z_{t+1} = z_t + a_t F(z_t, X_{t+1}).
 ```
 
-where `F` is a `VectorField`, `a[n]` is a typed control such as a
-`LearningRate`, and the state can itself belong to another `Recursion`.
-Vector fields support algebraic scaling and addition, so an adaptive control
-recursion can multiply another vector field.
+In code, `z_t` is owned by a `Recursion`, `F` is a `VectorField`, and `a_t` is
+a `step_size`. The step size may be a float, a schedule, or another recursion.
+That gives a small vocabulary for writing recursive systems: outer algorithms
+own their state, auxiliary recursions own their own state, and the wiring
+between them is explicit.
+
+## Minimal Example
 
 ```python
+import numpy as np
+
 from two_timescale import LearningRate, Recursion, VectorField
 
-control = Recursion(0.5, VectorField(lambda state, obs, ctx: 0.1), step_size=1.0)
-field = VectorField(lambda state, obs, ctx: obs - state) * control
-tracked = Recursion(0.0, field, step_size=LearningRate(1.0))
-
-tracked.advance(2.0)  # 1.0
-control.advance(None) # control state is now 0.6
-tracked.advance(2.0)  # 1.6
-```
-
-`EMARecursion` is the same recursion algebra specialized to exponential moving
-averages:
-
-```python
-from two_timescale import EMARecursion
-
-average = EMARecursion(0.0, step_size=0.1)
-average.advance(5.0)
-```
-
-NGPCA exposes the paper's online update as `advance`. Pass a single observation
-or a two-dimensional stream; the caller owns any random sampling policy. Inside
-each local PCA unit, the adaptive gain is declared as smoothed diagnostic
-statistics for the residual signal, projected signal, and eigenvalues. The
-update step composes those statistics with generic stochastic approximation
-objects: `StateTrackingRecursion` for the center, `EFORRLSARecursion` for the
-eigensystem, and `ScalarTrackingRecursion` for the unrepresented variance.
-
-```python
-from two_timescale import NGPCAParameters, NamedPotential, NeuralGasPCA
-
-model = NeuralGasPCA(
-    4,
-    params=NGPCAParameters(potential_function=NamedPotential("AR", rmax=200.0)),
+mean_field = VectorField(
+    lambda state, observation, context: observation - state,
+    name="mean_field",
 )
-model.initialize(data)
-model.advance(data[:100])
+
+mean = Recursion(
+    state=np.zeros(2),
+    field=mean_field,
+    step_size=LearningRate(0.05),
+)
+
+for x in observations:
+    mean.advance(x)
 ```
+
+The same language is used by the package-level algorithms:
+
+- `AdamPreconditioner` owns Adam's first moment, second moment, and bias
+  recursions, then preconditions an outer vector field.
+- `NeuralGasPCA` expresses local adaptive gains as smoothed statistics and uses
+  separate recursions for centers, PCA shape, and residual variance.
+- `GaussianMixtureRecursion` tracks online mixture sufficient statistics.
 
 ## Examples
 
-Run the NGPCA example with the same DistGen sample source and NGPCA
-configuration as `../geometry_experiments/NGPCA-Clustering/Example_distgen.m`.
-By default it reads
-`../geometry_experiments/GeomDiagnostics.jl/outputs/banana_samples.csv`, uses
-hard clustering, 4 units, PCA dimensionality 2, 20,000 iterations, and a
-MATLAB-compatible `rng(0,"twister")` random stream.
+Run the NGPCA example:
 
 ```bash
 python -m examples.ngpca_example
 ```
 
-The MATLAB environment overrides are also supported:
-
-```bash
-SAMPLE_NAME=banana_samples NGPCA_NUM_UNITS=4 NGPCA_PLOT=1 python -m examples.ngpca_example
-```
-
-Plot or save the NGPCA result with MATLAB-style unit ellipses and PCA axes:
+Plot or save the NGPCA result:
 
 ```bash
 python -m examples.ngpca_example --plot
@@ -88,22 +64,29 @@ Run the online Gaussian mixture recursion example:
 
 ```bash
 python -m examples.gmm_recursion_example
-```
-
-Its fitted components can be plotted the same way:
-
-```bash
 python -m examples.gmm_recursion_example --plot
-python -m examples.gmm_recursion_example --save outputs/gmm.png
 ```
 
-Plotting uses Matplotlib. With uv, install the example extra first:
+Plotting uses Matplotlib:
 
 ```bash
 uv sync --extra examples
 ```
 
-Run smoke tests:
+## Documentation
+
+Build the Sphinx documentation locally:
+
+```bash
+uv sync --extra docs
+uv run --extra docs sphinx-build -b html docs docs/_build/html
+```
+
+The docs include notation, concepts, reusable patterns, algorithm
+decompositions with equations and citations, how-to examples, developer notes,
+and an API reference.
+
+## Tests
 
 ```bash
 uv run python -m unittest

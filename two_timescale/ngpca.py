@@ -9,11 +9,10 @@ gain of each sufficiently ranked unit, and then advances the center and local
 PCA shape recursions.
 
 References:
-    Migenda02/2_RGHQJ3PP:
+    Migenda, Moeller, and Schenck (2024):
         Migenda, N., Moeller, R., & Schenck, W. (2024). Adaptive local
         Principal Component Analysis improves the clustering of
-        high-dimensional data. *Pattern Recognition*, 146, 110030. Zotero item
-        key ``RGHQJ3PP``.
+        high-dimensional data. *Pattern Recognition*, 146, 110030.
 """
 
 from __future__ import annotations
@@ -192,7 +191,7 @@ class NeuralGasPCA:
             orthonormalization.
 
     References:
-        Migenda02/2_RGHQJ3PP:
+        Migenda, Moeller, and Schenck (2024):
             Equations (16)--(21) describe neural-gas neighborhood updates and
             adaptive local learning-rate control.
     """
