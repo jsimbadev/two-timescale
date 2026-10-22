@@ -1,0 +1,36 @@
+:root {
+  --content-width: 840px;
+  --sidebar-item-spacing-vertical: 0.35rem;
+}
+
+body {
+  letter-spacing: 0;
+}
+
+.sidebar-brand-text {
+  font-weight: 720;
+}
+
+.content {
+  line-height: 1.65;
+}
+
+.content h1 {
+  font-size: 2.35rem;
+}
+
+.content h2 {
+  margin-top: 2.3rem;
+}
+
+.admonition.note {
+  border-radius: 6px;
+}
+
+div.highlight {
+  border-radius: 6px;
+}
+
+.toctree-wrapper.compound > ul {
+  margin-top: 0.5rem;
+}

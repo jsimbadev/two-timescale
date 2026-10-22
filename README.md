@@ -75,6 +75,16 @@ uv sync --extra examples
 
 ## Documentation
 
+The `Documentation` GitHub Actions workflow publishes the documentation to
+[jsimbadev.github.io/two-timescale](https://jsimbadev.github.io/two-timescale/)
+once GitHub Pages is enabled. Changes to the documentation or library on `main`
+rebuild and deploy the site; pull requests check the build.
+
+To enable hosting, open the repository's **Settings → Pages** and select
+**GitHub Actions** as the build and deployment source. Commit and push the
+`docs/` directory and `.github/workflows/docs.yml` to `main`. The workflow can
+also be started manually from the **Actions** tab.
+
 Build the Sphinx documentation locally:
 
 ```bash
